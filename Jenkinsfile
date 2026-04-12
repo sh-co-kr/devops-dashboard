@@ -83,22 +83,15 @@ pipeline {
         dir("${CANONICAL_DEPLOY_DIR}") {
           sh '''
             set -eux
-            if docker compose version >/dev/null 2>&1; then
-              COMPOSE_CMD="docker compose"
-            else
-              COMPOSE_CMD="docker-compose"
-            fi
             if [ "${TARGET_ENV}" = "prod" ]; then
-              for i in 1 2 3 4 5 6 7 8 9 10; do
-                curl -fsS http://127.0.0.1:7110/ >/dev/null && exit 0
-                sleep 3
-              done
+              TARGET_CONTAINER="devops-dashboard-prod"
             elif [ "${TARGET_ENV}" = "dev" ]; then
-              for i in 1 2 3 4 5 6 7 8 9 10; do
-                curl -fsS http://127.0.0.1:7111/ >/dev/null && exit 0
-                sleep 3
-              done
+              TARGET_CONTAINER="devops-dashboard-dev"
             fi
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              [ "$(docker inspect -f '{{.State.Status}}' "$TARGET_CONTAINER")" = "running" ] && exit 0
+              sleep 3
+            done
             exit 1
           '''
         }

@@ -33,15 +33,52 @@
 1. Job 종류는 `Multibranch Pipeline` 사용
 2. Branch Source는 GitHub 저장소 `sh-co-kr/devops-dashboard`
 3. Discover branches 전략은 최소 `main`, `develop`를 포함해야 함
-4. Script Path는 `apps/devops-dashboard/Jenkinsfile`
+4. Script Path는 `Jenkinsfile`
 5. Scan by webhook 사용 시 GitHub webhook 이벤트는 `push` 기준으로 설정
+
+## Jenkins UI 클릭 순서
+
+1. Jenkins 메인 화면에서 `New Item`
+2. 이름 입력
+   `devops-dashboard`
+3. `Multibranch Pipeline` 선택 후 `OK`
+4. `Branch Sources`에서 `Add source` -> `GitHub`
+5. Repository는 `https://github.com/sh-co-kr/devops-dashboard.git` 또는 연결된 GitHub source 선택
+6. Credentials가 필요하면 GitHub 토큰 연결
+7. `Behaviors`에서 브랜치 탐색 정책 확인
+   `main`, `develop`가 스캔 대상이어야 함
+8. `Build Configuration`의 `Script Path`를 `Jenkinsfile`로 입력
+9. `Scan Multibranch Pipeline Triggers`에서 webhook 기반 스캔 사용
+10. `Save`
+11. Job 화면에서 `Scan Repository Now`
+12. `main`, `develop` 브랜치 Job이 생성되었는지 확인
 
 ## GitHub webhook 권장 설정
 
-1. Payload URL: `https://<jenkins-host>/github-webhook/`
+1. Payload URL: `http://suho0213.iptime.org:9090/github-webhook/`
 2. Content type: `application/json`
 3. 이벤트: `Just the push event`
 4. GitHub 저장소에 실제 `main`, `develop` 브랜치가 있어야 함
+
+현재 확인 결과:
+- `GET http://suho0213.iptime.org:9090/github-webhook/` -> `405`
+- `POST http://suho0213.iptime.org:9090/github-webhook/` -> `400`
+
+위 응답은 Jenkins webhook 엔드포인트가 살아 있다는 의미다.
+
+## GitHub UI 클릭 순서
+
+1. GitHub 저장소로 이동
+2. `Settings` -> `Webhooks`
+3. `Add webhook`
+4. Payload URL에 `https://<jenkins-host>/github-webhook/` 입력
+   실제 값: `http://suho0213.iptime.org:9090/github-webhook/`
+5. Content type은 `application/json`
+6. Secret이 있으면 Jenkins와 동일한 값 입력
+7. 이벤트는 `Just the push event`
+8. `Active` 체크
+9. `Add webhook`
+10. 저장 후 `Recent Deliveries`에서 `200` 응답 확인
 
 ## 권장 운영 방식
 
@@ -63,7 +100,7 @@ curl -fsS http://127.0.0.1:7111/ >/dev/null
 ```bash
 cd /home/user/sh-co-kr/apps/devops-dashboard
 git checkout main
-git checkout -b develop
+git checkout develop
 git push -u origin develop
 git checkout main
 ```

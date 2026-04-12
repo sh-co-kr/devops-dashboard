@@ -9,9 +9,9 @@ pipeline {
   environment {
     PROJECT_NAME = "devops-dashboard"
     PROJECT_SLUG = "devops-dashboard"
-    PROJECT_DIR = "${WORKSPACE}/apps/devops-dashboard"
+    PROJECT_DIR = "${WORKSPACE}"
     DEPLOY_DIR = "${PROJECT_DIR}/deploy"
-    DEVOPS_DASHBOARD_REPO_ROOT = "${WORKSPACE}"
+    DEVOPS_DASHBOARD_REPO_ROOT = "${PROJECT_DIR}"
   }
 
   stages {

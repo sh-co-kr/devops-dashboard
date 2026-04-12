@@ -9,8 +9,9 @@ pipeline {
   environment {
     PROJECT_NAME = "devops-dashboard"
     PROJECT_SLUG = "devops-dashboard"
-    PROJECT_DIR = "/home/user/sh-co-kr/apps/devops-dashboard"
+    PROJECT_DIR = "${WORKSPACE}/apps/devops-dashboard"
     DEPLOY_DIR = "${PROJECT_DIR}/deploy"
+    DEVOPS_DASHBOARD_REPO_ROOT = "${WORKSPACE}"
   }
 
   stages {
@@ -42,6 +43,7 @@ pipeline {
         dir("${DEPLOY_DIR}") {
           sh '''
             set -eux
+            export DEVOPS_DASHBOARD_REPO_ROOT="${DEVOPS_DASHBOARD_REPO_ROOT}"
             docker compose -f docker-compose.yml build ${PROJECT_SLUG}_${TARGET_ENV}
             docker compose -f docker-compose.yml up -d ${PROJECT_SLUG}_${TARGET_ENV}
             docker compose -f docker-compose.yml ps

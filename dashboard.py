@@ -20,6 +20,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 from flask import Flask, render_template_string, request, jsonify
 
 # 선택적 라이브러리 임포트
@@ -44,16 +46,31 @@ except ImportError:
 # 설정 (배포 시 compose에서 PORT=호스트포트 로 1:1 매핑)
 PORT = int(os.environ.get("PORT", "4040"))
 
-_DEFAULT_PUBLIC_SITE = "http://suho0213.iptime.org"
+CONFIG_META_KEYS = ('project_name_mapping', 'project_order', 'dashboard_settings')
+ENV_DEFAULT_PUBLIC_SITE = (os.environ.get("DEFAULT_PUBLIC_SITE") or "").strip()
+DEFAULT_DASHBOARD_SETTINGS = {
+    'site_base_url': ENV_DEFAULT_PUBLIC_SITE,
+    'site_host_label': '',
+    'quick_links': [
+        {'title': '공유기 관리자', 'icon': '📡', 'port': 9080},
+        {'title': 'Jenkins 서버', 'icon': '👷', 'port': 9090},
+        {'title': 'GitHub 프로필', 'icon': '🐙', 'url': 'https://github.com/sh-co-kr'},
+        {'title': 'Linear', 'icon': '⚡', 'url': 'https://linear.app/dev-sh/'},
+        {'title': 'DD-WAY Frontend', 'icon': '🌐', 'port': 3000},
+        {'title': 'Meeting Compass (배포)', 'icon': '🧭', 'port': 7130},
+    ],
+}
 
 
-def _effective_public_site_base() -> str:
-    """🌐·Quick Links용. 빈 값·localhost·127.* 는 DDNS 기본으로 통일."""
-    raw = (os.environ.get("SITE_BASE_URL") or "").strip()
-    base = (raw or _DEFAULT_PUBLIC_SITE).rstrip("/")
+def _default_public_site() -> str:
+    return ENV_DEFAULT_PUBLIC_SITE or f"http://localhost:{PORT}"
+
+
+def normalize_public_site_base(raw: str | None) -> str:
+    """🌐 링크용 베이스 URL 정규화."""
+    base = (raw or '').strip().rstrip('/') or _default_public_site().rstrip('/')
     try:
-        from urllib.parse import urlparse
-        host = (urlparse(base).hostname or "").lower()
+        host = (urlparse(base).hostname or '').lower()
     except Exception:
         host = base.split("//", 1)[-1].split("/")[0].lower()
     if (
@@ -61,14 +78,72 @@ def _effective_public_site_base() -> str:
         or host in ("localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0")
         or host.startswith("127.")
     ):
-        return _DEFAULT_PUBLIC_SITE.rstrip("/")
+        return _default_public_site().rstrip('/')
     return base
 
 
-# 사이트 접속 링크(🌐·Quick Links)에 사용 — 스킴 포함, 끝 슬래시 없음
-SITE_BASE_URL = _effective_public_site_base()
-_site_for_label = SITE_BASE_URL.split("//", 1)[-1] if "//" in SITE_BASE_URL else SITE_BASE_URL
-SITE_HOST_LABEL = (os.environ.get("SITE_HOST_LABEL") or "").strip() or _site_for_label.split("/")[0]
+def _normalize_quick_links(raw_links) -> list[dict]:
+    if not isinstance(raw_links, list):
+        return list(DEFAULT_DASHBOARD_SETTINGS['quick_links'])
+
+    normalized = []
+    for item in raw_links:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get('title', '')).strip()
+        if not title:
+            continue
+        link = {'title': title, 'icon': str(item.get('icon', '🔗'))}
+        url = str(item.get('url', '')).strip()
+        if url:
+            link['url'] = url
+        else:
+            try:
+                port = int(item.get('port'))
+                if 1 <= port <= 65535:
+                    link['port'] = port
+            except (TypeError, ValueError):
+                pass
+            path = str(item.get('path', '')).strip()
+            if path:
+                link['path'] = path
+        label = str(item.get('label', '')).strip()
+        if label:
+            link['label'] = label
+        normalized.append(link)
+
+    return normalized or list(DEFAULT_DASHBOARD_SETTINGS['quick_links'])
+
+
+def get_dashboard_settings(config: dict | None = None) -> dict:
+    if config is None:
+        config = load_config()
+
+    settings = dict(DEFAULT_DASHBOARD_SETTINGS)
+    raw_settings = config.get('dashboard_settings', {})
+    if isinstance(raw_settings, dict):
+        for key in ('site_base_url', 'site_host_label'):
+            value = raw_settings.get(key)
+            if isinstance(value, str):
+                settings[key] = value.strip()
+        settings['quick_links'] = _normalize_quick_links(raw_settings.get('quick_links'))
+    else:
+        settings['quick_links'] = _normalize_quick_links(None)
+
+    env_site_base_url = (os.environ.get("SITE_BASE_URL") or '').strip()
+    if env_site_base_url:
+        settings['site_base_url'] = env_site_base_url
+    settings['site_base_url'] = normalize_public_site_base(settings.get('site_base_url'))
+
+    derived_host_label = (urlparse(settings['site_base_url']).netloc or settings['site_base_url']).split('/')[0]
+    env_site_host_label = (os.environ.get("SITE_HOST_LABEL") or '').strip()
+    settings['site_host_label'] = env_site_host_label or settings.get('site_host_label') or derived_host_label
+    settings['default_public_site'] = _default_public_site().rstrip('/')
+    return settings
+
+
+def is_project_config_entry(key: str, value) -> bool:
+    return key not in CONFIG_META_KEYS and isinstance(value, dict) and value is not None
 # Docker 환경에서는 SCAN_PATH 환경변수 사용, 없으면 상위 디렉토리(로컬: …/apps).
 # 이미지에 dashboard만 /app 에 두면 parent.parent 가 '/' 가 되어 전체 파일시스템 스캔을 유발하므로 방지한다.
 _default_scan = Path(__file__).parent.parent
@@ -145,6 +220,13 @@ if DOCKER_AVAILABLE:
     except Exception as e:
         docker_client = None
 
+if PSUTIL_AVAILABLE:
+    try:
+        # 첫 샘플을 미리 초기화해 두면 이후 비차단 cpu_percent 조회가 즉시 의미 있는 값을 준다.
+        psutil.cpu_percent(interval=None)
+    except Exception:
+        pass
+
 # ============================================================
 # 데이터 로딩 함수
 # ============================================================
@@ -182,7 +264,7 @@ def normalize_project_configs(config: dict) -> dict:
     
     normalized = {}
     for key, value in config.items():
-        if key in ('project_name_mapping', 'project_order'):
+        if not is_project_config_entry(key, value):
             continue
         
         # 매핑이 있으면 매핑된 이름 사용, 없으면 원래 키 사용
@@ -270,7 +352,44 @@ def scan_markdown_files(force_refresh: bool = False) -> dict:
     return result
 
 
-def get_docker_status(container_name: str) -> dict:
+def scan_markdown_project_names(force_refresh: bool = False) -> set[str]:
+    cache_key = 'markdown_project_names'
+    if not force_refresh:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    config = load_config()
+    name_mapping = config.get('project_name_mapping', {})
+    project_names = set()
+
+    for root, dirs, files in os.walk(BASE_DIR):
+        dirs[:] = [d for d in dirs if d not in IGNORE_PATTERNS]
+        root_path = Path(root)
+        if any(p in root_path.parts for p in IGNORE_PATTERNS):
+            continue
+
+        if not any(file.endswith('.md') for file in files):
+            continue
+
+        try:
+            relative = root_path.relative_to(BASE_DIR)
+        except ValueError:
+            continue
+
+        parts = relative.parts
+        if not parts:
+            project_names.add('root')
+            continue
+
+        folder_name, _ = _project_key_from_relative_parts(parts)
+        project_names.add(name_mapping.get(folder_name, folder_name))
+
+    cache.set(cache_key, project_names)
+    return project_names
+
+
+def get_docker_status(container_name: str, include_metrics: bool = True) -> dict:
     result = {
         'running': False, 'status': 'unknown', 'health': 'unknown',
         'memory_mb': 0, 'cpu_percent': 0, 'uptime': 'N/A', 'error': None,
@@ -299,7 +418,7 @@ def get_docker_status(container_name: str) -> dict:
             except:
                 pass
         
-        if result['running']:
+        if result['running'] and include_metrics:
             try:
                 stats = container.stats(stream=False)
                 result['memory_mb'] = round(stats.get('memory_stats', {}).get('usage', 0) / (1024 * 1024), 1)
@@ -374,7 +493,7 @@ def probe_http_health(port, health_path: str):
         return "unhealthy"
 
 
-def get_process_status(target: str, keyword: str) -> dict:
+def get_process_status(target: str, keyword: str, include_metrics: bool = True) -> dict:
     result = {
         'running': False, 'status': 'not running', 'pid': None,
         'memory_mb': 0, 'cpu_percent': 0, 'uptime': 'N/A', 'error': None
@@ -396,11 +515,11 @@ def get_process_status(target: str, keyword: str) -> dict:
                     result['status'] = 'running'
                     result['pid'] = pinfo['pid']
                     
-                    mem = pinfo.get('memory_info')
-                    if mem:
-                        result['memory_mb'] = round(mem.rss / (1024 * 1024), 1)
-                    
-                    result['cpu_percent'] = proc.cpu_percent(interval=0.1)
+                    if include_metrics:
+                        mem = pinfo.get('memory_info')
+                        if mem:
+                            result['memory_mb'] = round(mem.rss / (1024 * 1024), 1)
+                        result['cpu_percent'] = proc.cpu_percent(interval=0.1)
                     
                     create_time = pinfo.get('create_time')
                     if create_time:
@@ -416,8 +535,14 @@ def get_process_status(target: str, keyword: str) -> dict:
     return result
 
 
-def get_project_status(project_name: str, project_config: dict, force_refresh: bool = False) -> dict:
+def get_project_status(project_name: str, project_config: dict, force_refresh: bool = False, include_metrics: bool = True) -> dict:
     """단일 프로젝트 상태 조회"""
+    cache_key = f"project_detail:{project_name}:{'full' if include_metrics else 'summary'}"
+    if not force_refresh:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
     ptype = project_config.get('type', 'info')
     environments = project_config.get('environments', [])
     
@@ -432,9 +557,10 @@ def get_project_status(project_name: str, project_config: dict, force_refresh: b
     }
     
     if ptype == 'info':
+        cache.set(cache_key, result)
         return result
-    
-    for env in environments:
+
+    def build_env_status(env: dict) -> dict:
         _site_port_raw = env.get('site_port', '__missing__')
         if _site_port_raw == '__missing__':
             _site_port = env.get('port')
@@ -457,17 +583,17 @@ def get_project_status(project_name: str, project_config: dict, force_refresh: b
         }
         
         if ptype == 'docker':
-            status = get_docker_status(env.get('target', ''))
+            status = get_docker_status(env.get('target', ''), include_metrics=include_metrics)
             health_path = (env.get('path') or '').strip()
             if status.get('running') and health_path:
                 http_h = probe_http_health(env.get('port'), health_path)
                 if http_h is not None:
                     status['health'] = http_h
         elif ptype == 'process':
-            status = get_process_status(env.get('target', ''), env.get('keyword', ''))
+            status = get_process_status(env.get('target', ''), env.get('keyword', ''), include_metrics=include_metrics)
         else:
             status = {'running': False, 'status': 'info'}
-        
+
         env_status.update(status)
         if ptype == 'docker':
             hp_list = status.get('host_ports') or []
@@ -479,26 +605,50 @@ def get_project_status(project_name: str, project_config: dict, force_refresh: b
             else:
                 env_status['port_container_display'] = cfg_port
             env_status['port_backend_display'] = cfg_port
-        result['environments'].append(env_status)
-        
-        if status.get('running'):
+        return env_status
+
+    if len(environments) > 1:
+        max_workers = min(4, len(environments))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            env_results = list(executor.map(build_env_status, environments))
+    else:
+        env_results = [build_env_status(env) for env in environments]
+
+    result['environments'].extend(env_results)
+    for env_status in env_results:
+        if env_status.get('running'):
             result['running_count'] += 1
-        if status.get('health') == 'unhealthy' or (ptype == 'docker' and not status.get('running')):
+        if env_status.get('health') == 'unhealthy' or (ptype == 'docker' and not env_status.get('running')):
             result['has_issues'] = True
     
+    cache.set(cache_key, result)
     return result
 
 
-def get_all_project_status(config: dict, force_refresh: bool = False) -> dict:
-    cache_key = 'project_status'
+def get_all_project_status(config: dict, force_refresh: bool = False, include_metrics: bool = True) -> dict:
+    cache_key = f"project_status:{'full' if include_metrics else 'summary'}"
     if not force_refresh:
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
-    
-    result = {}
-    for project_name, project_config in config.items():
-        result[project_name] = get_project_status(project_name, project_config, force_refresh)
+
+    def build_project_status(item):
+        project_name, project_config = item
+        return project_name, get_project_status(
+            project_name,
+            project_config,
+            force_refresh=force_refresh,
+            include_metrics=include_metrics,
+        )
+
+    items = list(config.items())
+    if len(items) > 1:
+        max_workers = min(8, len(items))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            pairs = list(executor.map(build_project_status, items))
+        result = dict(pairs)
+    else:
+        result = dict(build_project_status(item) for item in items)
     
     cache.set(cache_key, result)
     return result
@@ -523,7 +673,7 @@ def get_system_stats(force_refresh: bool = False) -> dict:
         return result
     
     try:
-        result['cpu']['percent'] = psutil.cpu_percent(interval=0.5)
+        result['cpu']['percent'] = psutil.cpu_percent(interval=None)
         result['cpu']['cores'] = psutil.cpu_count(logical=False) or 0
         result['cpu']['cores_logical'] = psutil.cpu_count(logical=True) or 0
         
@@ -564,7 +714,7 @@ def render_markdown_content(content: str) -> str:
 # ============================================================
 # HTML 템플릿 (AJAX 기반)
 # ============================================================
-HTML_TEMPLATE = '''
+HTML_TEMPLATE = r'''
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -1407,6 +1557,9 @@ HTML_TEMPLATE = '''
                     <div class="config-tab" onclick="switchConfigTab('projects')" data-tab="projects">
                         <span>🔧 프로젝트 설정</span>
                     </div>
+                    <div class="config-tab" onclick="switchConfigTab('dashboard')" data-tab="dashboard">
+                        <span>🌐 대시보드 설정</span>
+                    </div>
                 </div>
                 
                 <!-- 탭 컨텐츠 -->
@@ -1451,6 +1604,31 @@ HTML_TEMPLATE = '''
                             프로젝트의 타입, 환경, 포트 등을 설정할 수 있습니다.
                         </div>
                         <div id="projectConfigList">
+                            <!-- 동적으로 생성됨 -->
+                        </div>
+                    </div>
+
+                    <!-- 대시보드 설정 탭 -->
+                    <div id="tab-dashboard" class="config-tab-content">
+                        <h3 style="font-size: 1rem; margin-bottom: 10px; color: var(--text-primary);">🌐 대시보드 링크 설정</h3>
+                        <div style="margin-bottom: 15px; color: var(--text-secondary); font-size: 0.85rem;">
+                            Quick Links와 공개 사이트 주소를 설정할 수 있습니다. 비워두면 현재 환경 변수 또는 기본값을 사용합니다.
+                        </div>
+                        <div style="display: grid; gap: 12px; margin-bottom: 20px;">
+                            <label style="display: grid; gap: 6px;">
+                                <span style="font-size: 0.85rem; color: var(--text-secondary);">SITE_BASE_URL</span>
+                                <input id="dashboardSiteBaseUrl" type="text" placeholder="예: https://ops.example.com" style="width: 100%; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateDashboardSetting('site_base_url', this.value)">
+                            </label>
+                            <label style="display: grid; gap: 6px;">
+                                <span style="font-size: 0.85rem; color: var(--text-secondary);">SITE_HOST_LABEL</span>
+                                <input id="dashboardSiteHostLabel" type="text" placeholder="예: ops.example.com" style="width: 100%; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateDashboardSetting('site_host_label', this.value)">
+                            </label>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h4 style="font-size: 0.95rem; margin: 0; color: var(--text-primary);">🔗 Quick Links</h4>
+                            <button class="btn btn-primary" onclick="addQuickLinkRow()">➕ 링크 추가</button>
+                        </div>
+                        <div id="dashboardQuickLinksList" style="display: grid; gap: 12px;">
                             <!-- 동적으로 생성됨 -->
                         </div>
                     </div>
@@ -1502,12 +1680,15 @@ HTML_TEMPLATE = '''
     <script>
         const SITE_BASE_URL = {{ site_base_url | tojson }};
         const SITE_HOST_LABEL = {{ site_host_label | tojson }};
-        const DEFAULT_PUBLIC_SITE = 'http://suho0213.iptime.org';
-        /** localhost/127.* 가 서버에서 넘어와도 🌐 링크는 DDNS로 */
+        const DEFAULT_PUBLIC_SITE = {{ default_public_site | tojson }};
+        const DASHBOARD_PORT = {{ dashboard_port | tojson }};
+        const QUICK_LINKS = {{ quick_links | tojson }};
+        const CONFIG_META_KEYS = ['project_name_mapping', 'project_order', 'dashboard_settings'];
+        /** localhost/127.* 가 들어와도 외부 접근용 기본 베이스로 정규화 */
         function getPublicSiteBase() {
-            let b = (typeof SITE_BASE_URL === 'string' && SITE_BASE_URL.trim()) ? SITE_BASE_URL.trim().replace(/\\/$/, '') : DEFAULT_PUBLIC_SITE;
+            let b = (typeof SITE_BASE_URL === 'string' && SITE_BASE_URL.trim()) ? SITE_BASE_URL.trim().replace(/\/$/, '') : DEFAULT_PUBLIC_SITE;
             try {
-                const u = new URL(b.match(/^https?:\\/\\//i) ? b : 'http://' + b);
+                const u = new URL(b.match(/^https?:\/\//i) ? b : 'http://' + b);
                 const h = (u.hostname || '').toLowerCase();
                 if (!h || h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0' || h.startsWith('127.')) return DEFAULT_PUBLIC_SITE;
             } catch (e) {
@@ -1519,14 +1700,16 @@ HTML_TEMPLATE = '''
         function absoluteOriginForPort(baseRaw, port) {
             const p = Number(port);
             if (!p || p < 1 || p > 65535) return '#';
-            let base = String(baseRaw || '').trim().replace(/\\/$/, '');
+            let base = String(baseRaw || '').trim().replace(/\/$/, '');
             if (!base) base = DEFAULT_PUBLIC_SITE;
             try {
-                const withScheme = /^https?:\\/\\//i.test(base) ? base : 'http://' + base;
+                const withScheme = /^https?:\/\//i.test(base) ? base : 'http://' + base;
                 const u = new URL(withScheme);
+                const fallbackUrl = new URL(/^https?:\/\//i.test(DEFAULT_PUBLIC_SITE) ? DEFAULT_PUBLIC_SITE : 'http://' + DEFAULT_PUBLIC_SITE);
                 let h = (u.hostname || '').toLowerCase();
                 if (!h || h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0' || h.startsWith('127.')) {
-                    u.hostname = 'suho0213.iptime.org';
+                    u.hostname = fallbackUrl.hostname;
+                    u.protocol = fallbackUrl.protocol;
                 }
                 u.port = String(p);
                 return u.origin;
@@ -1541,6 +1724,42 @@ HTML_TEMPLATE = '''
             if (!path) return origin;
             if (/^https?:\/\//i.test(path)) return path;
             return origin + (path.startsWith('/') ? path : '/' + path);
+        }
+        function getDashboardLabel() {
+            return `${SITE_HOST_LABEL}:${DASHBOARD_PORT}`;
+        }
+        function getQuickLinkHref(link) {
+            if (!link || typeof link !== 'object') return '#';
+            if (link.url) return String(link.url);
+            if (link.port) return absoluteUrlForPortAndPath(getPublicSiteBase(), link.port, link.path || '');
+            return '#';
+        }
+        function getQuickLinkLabel(link) {
+            if (!link || typeof link !== 'object') return '';
+            if (link.label) return String(link.label);
+            if (link.url) {
+                try {
+                    return new URL(String(link.url)).host;
+                } catch (e) {
+                    return String(link.url);
+                }
+            }
+            if (link.port) {
+                return `${SITE_HOST_LABEL}:${link.port}${link.path || ''}`;
+            }
+            return '';
+        }
+        function renderQuickLinks() {
+            if (!Array.isArray(QUICK_LINKS) || QUICK_LINKS.length === 0) {
+                return '<div style="color: var(--text-muted);">표시할 Quick Link가 없습니다.</div>';
+            }
+            return QUICK_LINKS.map(link => `
+                <a class="quick-link-card" href="${getQuickLinkHref(link)}" target="_blank">
+                    <div class="quick-link-icon">${link.icon || '🔗'}</div>
+                    <div class="quick-link-info"><div class="title">${link.title || 'Quick Link'}</div><div class="url">${getQuickLinkLabel(link)}</div></div>
+                    <div class="quick-link-arrow">→</div>
+                </a>
+            `).join('');
         }
         let currentProject = null;
         let currentLogTarget = null;
@@ -1682,45 +1901,14 @@ HTML_TEMPLATE = '''
                                 <div class="info-item"><div class="icon">🟢</div><div class="label">Running</div><div class="value" id="summaryRunning">${document.getElementById('runningCount').textContent}</div></div>
                                 <div class="info-item"><div class="icon">🔴</div><div class="label">Issues</div><div class="value" id="summaryIssues">${document.getElementById('issueCount').textContent}</div></div>
                                 <div class="info-item"><div class="icon">📁</div><div class="label">Projects</div><div class="value">${document.querySelectorAll('.project-item').length}</div></div>
-                                <div class="info-item"><div class="icon">🌐</div><div class="label">Dashboard</div><div class="value">:4040</div></div>
+                                <div class="info-item"><div class="icon">🌐</div><div class="label">Dashboard</div><div class="value">${getDashboardLabel()}</div></div>
                             </div>
                         </div>
                     </div>
                     
                     <div class="quick-links">
                         <div class="section-title">🔗 Quick Links</div>
-                        <div class="quick-links-grid">
-                            <a class="quick-link-card" href="${absoluteOriginForPort(getPublicSiteBase(), 9080)}" target="_blank">
-                                <div class="quick-link-icon">📡</div>
-                                <div class="quick-link-info"><div class="title">공유기 관리자</div><div class="url">${SITE_HOST_LABEL}:9080</div></div>
-                                <div class="quick-link-arrow">→</div>
-                            </a>
-                            <a class="quick-link-card" href="${absoluteOriginForPort(getPublicSiteBase(), 9090)}" target="_blank">
-                                <div class="quick-link-icon">👷</div>
-                                <div class="quick-link-info"><div class="title">Jenkins 서버</div><div class="url">${SITE_HOST_LABEL}:9090</div></div>
-                                <div class="quick-link-arrow">→</div>
-                            </a>
-                            <a class="quick-link-card" href="https://github.com/sh-co-kr" target="_blank">
-                                <div class="quick-link-icon">🐙</div>
-                                <div class="quick-link-info"><div class="title">GitHub 프로필</div><div class="url">github.com/sh-co-kr</div></div>
-                                <div class="quick-link-arrow">→</div>
-                            </a>
-                            <a class="quick-link-card" href="https://linear.app/dev-sh/" target="_blank">
-                                <div class="quick-link-icon">⚡</div>
-                                <div class="quick-link-info"><div class="title">Linear</div><div class="url">linear.app/dev-sh</div></div>
-                                <div class="quick-link-arrow">→</div>
-                            </a>
-                            <a class="quick-link-card" href="${absoluteOriginForPort(getPublicSiteBase(), 3000)}" target="_blank">
-                                <div class="quick-link-icon">🌐</div>
-                                <div class="quick-link-info"><div class="title">DD-WAY Frontend</div><div class="url">${SITE_HOST_LABEL}:3000</div></div>
-                                <div class="quick-link-arrow">→</div>
-                            </a>
-                            <a class="quick-link-card" href="${absoluteOriginForPort(getPublicSiteBase(), 7130)}" target="_blank">
-                                <div class="quick-link-icon">🧭</div>
-                                <div class="quick-link-info"><div class="title">Meeting Compass (배포)</div><div class="url">${SITE_HOST_LABEL}:7130</div></div>
-                                <div class="quick-link-arrow">→</div>
-                            </a>
-                        </div>
+                        <div class="quick-links-grid">${renderQuickLinks()}</div>
                     </div>
                 </div>
             `;
@@ -1748,14 +1936,15 @@ HTML_TEMPLATE = '''
         }
         
         // 프로젝트 로드
-        async function loadProject(name) {
+        async function loadProject(name, forceRefresh = false) {
             currentProject = name;
             currentFile = null;
             setActiveProject(name);
             showLoading();
             
             try {
-                const response = await fetch(`/api/project/${encodeURIComponent(name)}`);
+                const qs = forceRefresh ? '?refresh=true' : '';
+                const response = await fetch(`/api/project/${encodeURIComponent(name)}${qs}`);
                 const data = await response.json();
                 cacheTime = Date.now();
                 renderProject(data);
@@ -1775,7 +1964,7 @@ HTML_TEMPLATE = '''
                 data.has_issues ? `${data.running_count}/${data.total_count} (Issues)` :
                 data.running_count > 0 ? `${data.running_count}/${data.total_count} Running` : 'Stopped';
             const siteBaseForLinks = (data.public_site_base && String(data.public_site_base).trim())
-                ? String(data.public_site_base).trim().replace(/\\/$/, '')
+                ? String(data.public_site_base).trim().replace(/\/$/, '')
                 : getPublicSiteBase();
             
             let envCards = '';
@@ -1949,7 +2138,7 @@ HTML_TEMPLATE = '''
                         <span class="status-badge ${statusClass}">${statusText}</span>
                     </div>
                     <div class="panel-actions">
-                        <button class="btn" onclick="loadProject('${data.name}')">🔄 새로고침</button>
+                        <button class="btn" onclick="loadProject('${data.name}', true)">🔄 새로고침</button>
                     </div>
                 </div>
                 ${data.type === 'info' ? `
@@ -2046,6 +2235,7 @@ HTML_TEMPLATE = '''
                     renderConfigMapping();
                     await renderProjectOrder();
                     renderProjectConfigs();
+                    renderDashboardSettings();
                     document.getElementById('configModal').classList.add('show');
                 } else {
                     alert('설정을 불러올 수 없습니다: ' + (data.error || '알 수 없는 오류'));
@@ -2070,6 +2260,94 @@ HTML_TEMPLATE = '''
             if (event && event.target !== event.currentTarget) return;
             document.getElementById('configModal').classList.remove('show');
             configData = null;
+        }
+
+        function ensureDashboardSettings() {
+            if (!configData.dashboard_settings || typeof configData.dashboard_settings !== 'object') {
+                configData.dashboard_settings = {};
+            }
+            if (!Array.isArray(configData.dashboard_settings.quick_links)) {
+                configData.dashboard_settings.quick_links = [];
+            }
+            return configData.dashboard_settings;
+        }
+
+        function renderDashboardSettings() {
+            const settings = ensureDashboardSettings();
+            document.getElementById('dashboardSiteBaseUrl').value = settings.site_base_url || '';
+            document.getElementById('dashboardSiteHostLabel').value = settings.site_host_label || '';
+
+            const container = document.getElementById('dashboardQuickLinksList');
+            container.innerHTML = '';
+
+            settings.quick_links.forEach((link, index) => {
+                const row = document.createElement('div');
+                row.style.cssText = 'padding: 14px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 10px;';
+                row.innerHTML = `
+                    <div style="display: grid; grid-template-columns: 100px 1fr 1fr auto; gap: 10px; align-items: center;">
+                        <input type="text" value="${link.icon || ''}" placeholder="아이콘" style="padding: 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateQuickLink(${index}, 'icon', this.value)">
+                        <input type="text" value="${link.title || ''}" placeholder="제목" style="padding: 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateQuickLink(${index}, 'title', this.value)">
+                        <input type="text" value="${link.label || ''}" placeholder="표시 라벨 (선택)" style="padding: 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateQuickLink(${index}, 'label', this.value)">
+                        <button class="btn btn-icon" onclick="removeQuickLink(${index})" style="color: var(--error);">🗑️</button>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 120px 1fr; gap: 10px;">
+                        <input type="text" value="${link.url || ''}" placeholder="절대 URL (예: https://github.com/...)" style="padding: 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateQuickLink(${index}, 'url', this.value)">
+                        <input type="number" value="${link.port || ''}" placeholder="포트" style="padding: 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateQuickLink(${index}, 'port', this.value)">
+                        <input type="text" value="${link.path || ''}" placeholder="경로 (예: /admin)" style="padding: 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateQuickLink(${index}, 'path', this.value)">
+                    </div>
+                `;
+                container.appendChild(row);
+            });
+
+            if (settings.quick_links.length === 0) {
+                container.innerHTML = '<div style="padding: 16px; border: 1px dashed var(--border); border-radius: 8px; color: var(--text-muted);">설정된 Quick Link가 없습니다.</div>';
+            }
+        }
+
+        function updateDashboardSetting(key, value) {
+            const settings = ensureDashboardSettings();
+            settings[key] = String(value || '').trim();
+        }
+
+        function addQuickLinkRow() {
+            const settings = ensureDashboardSettings();
+            settings.quick_links.push({ icon: '🔗', title: '', url: '', label: '', path: '' });
+            renderDashboardSettings();
+        }
+
+        function removeQuickLink(index) {
+            const settings = ensureDashboardSettings();
+            settings.quick_links.splice(index, 1);
+            renderDashboardSettings();
+        }
+
+        function updateQuickLink(index, key, value) {
+            const settings = ensureDashboardSettings();
+            const link = settings.quick_links[index];
+            if (!link) return;
+
+            const normalized = String(value || '').trim();
+            if (key === 'port') {
+                if (!normalized) {
+                    delete link.port;
+                } else {
+                    const port = Number(normalized);
+                    if (Number.isFinite(port) && port > 0) {
+                        link.port = port;
+                    }
+                }
+                if (link.port) delete link.url;
+            } else {
+                if (normalized) {
+                    link[key] = normalized;
+                } else {
+                    delete link[key];
+                }
+                if (key === 'url' && normalized) {
+                    delete link.port;
+                    delete link.path;
+                }
+            }
         }
         
         function renderConfigMapping() {
@@ -2160,7 +2438,7 @@ HTML_TEMPLATE = '''
             const projects = new Set();
             const config = configData;
             for (const [key, value] of Object.entries(config)) {
-                if (key !== 'project_name_mapping' && key !== 'project_order' && typeof value === 'object') {
+                if (!CONFIG_META_KEYS.includes(key) && typeof value === 'object' && value !== null) {
                     const displayName = mapping[key] || key;
                     projects.add(displayName);
                 }
@@ -2251,7 +2529,7 @@ HTML_TEMPLATE = '''
             // 전체 프로젝트 목록 구성
             const projects = [];
             for (const [key, value] of Object.entries(config)) {
-                if (key !== 'project_name_mapping' && key !== 'project_order' && typeof value === 'object') {
+                if (!CONFIG_META_KEYS.includes(key) && typeof value === 'object' && value !== null) {
                     const displayName = mapping[key] || key;
                     projects.push(displayName);
                 }
@@ -2282,7 +2560,7 @@ HTML_TEMPLATE = '''
             const projects = [];
             
             for (const [key, value] of Object.entries(configData)) {
-                if (key !== 'project_name_mapping' && key !== 'project_order' && typeof value === 'object' && value !== null) {
+                if (!CONFIG_META_KEYS.includes(key) && typeof value === 'object' && value !== null) {
                     const displayName = mapping[key] || key;
                     projects.push({key, displayName, config: value});
                 }
@@ -2404,11 +2682,12 @@ HTML_TEMPLATE = '''
 @app.route('/')
 def index():
     config = load_config()
+    dashboard_settings = get_dashboard_settings(config)
     # 프로젝트 설정을 매핑된 이름으로 정규화
     project_configs = normalize_project_configs(config)
-    # 설정(project 목록)이 바뀌면 캐시된 전체 상태와 키가 어긋날 수 있어 첫 화면은 항상 갱신
-    all_status = get_all_project_status(project_configs, force_refresh=True)
-    md_files_map = scan_markdown_files()
+    # 첫 화면은 사이드바 요약만 필요하므로 가벼운 상태 조회를 사용한다.
+    all_status = get_all_project_status(project_configs, include_metrics=False)
+    markdown_projects = scan_markdown_project_names()
     
     projects = {}
     running_count = 0
@@ -2439,7 +2718,7 @@ def index():
         }
     
     # 설정에 없는 프로젝트도 추가
-    for project_name in md_files_map:
+    for project_name in markdown_projects:
         if project_name not in projects:
             projects[project_name] = {
                 'status_class': 'info',
@@ -2466,8 +2745,11 @@ def index():
         projects=projects,
         running_count=running_count,
         issue_count=issue_count,
-        site_base_url=SITE_BASE_URL,
-        site_host_label=SITE_HOST_LABEL,
+        site_base_url=dashboard_settings['site_base_url'],
+        site_host_label=dashboard_settings['site_host_label'],
+        default_public_site=dashboard_settings['default_public_site'],
+        dashboard_port=PORT,
+        quick_links=dashboard_settings['quick_links'],
     )
 
 
@@ -2479,14 +2761,21 @@ def api_system():
 
 @app.route('/api/project/<name>')
 def api_project(name):
+    force_refresh = request.args.get('refresh', '').lower() == 'true'
     config = load_config()
+    dashboard_settings = get_dashboard_settings(config)
     # 프로젝트 설정을 매핑된 이름으로 정규화
     project_configs = normalize_project_configs(config)
     project_config = project_configs.get(name, {'type': 'info'})
     
-    result = get_project_status(name, project_config)
-    # AJAX 렌더 시 🌐 링크는 항상 서버 기준 공개 베이스 사용 (초기 HTML의 SITE_BASE_URL·캐시와 불일치 방지)
-    result['public_site_base'] = SITE_BASE_URL.rstrip('/')
+    result = get_project_status(
+        name,
+        project_config,
+        force_refresh=force_refresh,
+        include_metrics=True,
+    )
+    # AJAX 렌더 시 초기 HTML과 같은 베이스를 사용한다.
+    result['public_site_base'] = dashboard_settings['site_base_url'].rstrip('/')
     
     # 마크다운 파일 목록 추가
     md_files = scan_markdown_files().get(name, [])
@@ -2635,11 +2924,12 @@ def api_projects_list():
 
 
 if __name__ == '__main__':
+    dashboard_settings = get_dashboard_settings()
     print(f"\n{'='*60}")
     print(f"🚀 통합 DevOps 대시보드 v3.0 (AJAX)")
     print(f"{'='*60}")
     print(f"🌐 바인딩: http://0.0.0.0:{PORT} (로컬: http://localhost:{PORT})")
-    print(f"🔗 사이트 링크 베이스: {SITE_BASE_URL} (환경변수 SITE_BASE_URL)")
+    print(f"🔗 사이트 링크 베이스: {dashboard_settings['site_base_url']} (config/env)")
     print(f"📁 스캔 경로: {BASE_DIR}")
     print(f"⚙️  설정 파일: {CONFIG_FILE}")
     print(f"⏱️  캐시 TTL: {CACHE_TTL}초")

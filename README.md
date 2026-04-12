@@ -54,7 +54,8 @@ markdown
 
 ```bash
 # venv 활성화 필요
-source /home/user/sh-co-kr/venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 
 # 대시보드 실행
 python dashboard.py
@@ -63,7 +64,7 @@ python dashboard.py
 nohup python dashboard.py > /tmp/dashboard.log 2>&1 &
 ```
 
-브라우저에서 **http://localhost:4040** 접속
+브라우저에서 **http://localhost:7112** 접속
 
 ## 설정
 
@@ -82,18 +83,19 @@ nohup python dashboard.py > /tmp/dashboard.log 2>&1 &
 }
 ```
 
-### 환경 변수 (dashboard.py 상단)
-- `PORT`: 서버 포트 (기본: 4040)
-- `BASE_DIR`: 프로젝트 스캔 경로
-- `CACHE_TTL`: 캐시 유효 시간 (기본: 10초)
-- `IGNORE_PATTERNS`: 무시할 폴더 패턴
+### 환경 변수
+- `PORT`: 서버 포트 (기본: `4040`, 로컬 compose는 `7112`)
+- `SCAN_PATH`: 프로젝트 스캔 경로
+- `SITE_BASE_URL`: 외부 접속 링크 생성 시 사용할 기본 주소
+- `SITE_HOST_LABEL`: Quick Links에 표시할 호스트 라벨
+- `DEFAULT_PUBLIC_SITE`: `SITE_BASE_URL`이 없거나 localhost일 때 사용할 fallback 주소
 
 ## 파일 구조
 
 ```
 devops-dashboard/
 ├── dashboard.py           # 메인 서버 (Flask + 모든 로직)
-├── dashboard_config.json  # 프로젝트-컨테이너 매핑
+├── dashboard_config.json  # 프로젝트-컨테이너 매핑 + dashboard_settings
 ├── requirements.txt       # 의존성
 └── README.md
 ```

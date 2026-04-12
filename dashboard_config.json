@@ -36,6 +36,18 @@
     "sh-co-kr-infra",
     "슬랙 봇"
   ],
+  "dashboard_settings": {
+    "site_base_url": "http://suho0213.iptime.org",
+    "site_host_label": "suho0213.iptime.org",
+    "quick_links": [
+      { "title": "공유기 관리자", "icon": "📡", "port": 9080 },
+      { "title": "Jenkins 서버", "icon": "👷", "port": 9090 },
+      { "title": "GitHub 프로필", "icon": "🐙", "url": "https://github.com/sh-co-kr", "label": "github.com/sh-co-kr" },
+      { "title": "Linear", "icon": "⚡", "url": "https://linear.app/dev-sh/", "label": "linear.app/dev-sh" },
+      { "title": "DD-WAY Frontend", "icon": "🌐", "port": 3000 },
+      { "title": "Meeting Compass (배포)", "icon": "🧭", "port": 7130 }
+    ]
+  },
   "DevOps 대시보드": {
     "type": "docker",
     "environments": [
@@ -86,8 +98,8 @@
   "barocut": {
     "type": "docker",
     "environments": [
-      { "name": "Prod", "port": 7085, "target": "barocut-prod", "path": "/api/health", "site_port": 7082, "site_path": "/" },
-      { "name": "Dev", "port": 7086, "target": "barocut-dev", "path": "/api/health", "site_port": 7083, "site_path": "/" }
+      { "name": "Prod", "port": 7085, "target": "barocut-prod", "path": "/api/health", "site_port": 7080, "site_path": "/" },
+      { "name": "Dev", "port": 7086, "target": "barocut-dev", "path": "/api/health", "site_port": 7081, "site_path": "/" }
     ]
   },
   "B-Side": {

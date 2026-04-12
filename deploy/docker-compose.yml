@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   devops-dashboard_prod:
     container_name: devops-dashboard-prod
@@ -18,7 +16,7 @@ services:
       - TZ=Asia/Seoul
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ${DEVOPS_DASHBOARD_REPO_ROOT:-/home/user/sh-co-kr}:/workspace:ro
+      - ${DEVOPS_DASHBOARD_REPO_ROOT:-../../..}:/workspace:ro
       - ../dashboard.py:/app/dashboard.py:ro
       - ../dashboard_config.json:/app/dashboard_config.json
     extra_hosts:
@@ -42,7 +40,7 @@ services:
       - TZ=Asia/Seoul
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ${DEVOPS_DASHBOARD_REPO_ROOT:-/home/user/sh-co-kr}:/workspace:ro
+      - ${DEVOPS_DASHBOARD_REPO_ROOT:-../../..}:/workspace:ro
       - ../dashboard.py:/app/dashboard.py:ro
       - ../dashboard_config.json:/app/dashboard_config.json
     extra_hosts:
@@ -68,7 +66,7 @@ services:
       - TZ=Asia/Seoul
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ${DEVOPS_DASHBOARD_REPO_ROOT:-/home/user/sh-co-kr}:/workspace:ro
+      - ${DEVOPS_DASHBOARD_REPO_ROOT:-../../..}:/workspace:ro
       - ../dashboard.py:/app/dashboard.py:ro
       - ../dashboard_config.json:/app/dashboard_config.json
     extra_hosts:

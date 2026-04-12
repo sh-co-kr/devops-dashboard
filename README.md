@@ -100,6 +100,14 @@ devops-dashboard/
 └── README.md
 ```
 
+## 브랜치 배포
+
+- `main` 브랜치: 운영 대시보드 `7110` 배포
+- `develop` 브랜치: 개발 대시보드 `7111` 배포
+- 그 외 브랜치: 자동배포 안 함
+
+자세한 Jenkins 설정과 운영 흐름은 [JENKINS_BRANCH_DEPLOY.md](/home/user/sh-co-kr/apps/devops-dashboard/JENKINS_BRANCH_DEPLOY.md) 참고
+
 ## 최근 업데이트
 
 ### 2026-01-21

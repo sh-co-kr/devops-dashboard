@@ -55,10 +55,16 @@
 
 ## GitHub webhook 권장 설정
 
-1. Payload URL: `https://<jenkins-host>/github-webhook/`
+1. Payload URL: `http://suho0213.iptime.org:9090/github-webhook/`
 2. Content type: `application/json`
 3. 이벤트: `Just the push event`
 4. GitHub 저장소에 실제 `main`, `develop` 브랜치가 있어야 함
+
+현재 확인 결과:
+- `GET http://suho0213.iptime.org:9090/github-webhook/` -> `405`
+- `POST http://suho0213.iptime.org:9090/github-webhook/` -> `400`
+
+위 응답은 Jenkins webhook 엔드포인트가 살아 있다는 의미다.
 
 ## GitHub UI 클릭 순서
 
@@ -66,6 +72,7 @@
 2. `Settings` -> `Webhooks`
 3. `Add webhook`
 4. Payload URL에 `https://<jenkins-host>/github-webhook/` 입력
+   실제 값: `http://suho0213.iptime.org:9090/github-webhook/`
 5. Content type은 `application/json`
 6. Secret이 있으면 Jenkins와 동일한 값 입력
 7. 이벤트는 `Just the push event`

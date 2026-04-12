@@ -1985,7 +1985,17 @@ HTML_TEMPLATE = r'''
                 showToast('오류: ' + e.message, 'error', 4200);
             }
         }
-        
+
+        function getFrontendLogTarget(env) {
+            const targets = getDockerActionTargets(env);
+            if (targets.length > 1) return targets[1];
+            return env && env.target ? env.target : null;
+        }
+
+        function getBackendLogTarget(env) {
+            return env && env.target ? env.target : null;
+        }
+
         // 프로젝트 로드
         async function loadProject(name, forceRefresh = false) {
             currentProject = name;
@@ -2051,7 +2061,8 @@ HTML_TEMPLATE = r'''
                                     ${env.name}
                                 </div>
                                 <div class="env-actions">
-                                    ${data.type === 'docker' ? `<button class="btn btn-icon" onclick='openLogModal(${JSON.stringify(env.target)}, ${JSON.stringify(`${data.name} - ${env.name}`)})' title="콘솔 로그">📜</button>` : ''}
+                                    ${data.type === 'docker' && getFrontendLogTarget(env) ? `<button class="btn btn-icon" onclick='openLogModal(${JSON.stringify(getFrontendLogTarget(env))}, ${JSON.stringify(`${data.name} - ${env.name} · 프론트`)})' title="프론트 로그">📜F</button>` : ''}
+                                    ${data.type === 'docker' && getDockerActionTargets(env).length > 1 ? `<button class="btn btn-icon" onclick='openCombinedLogModal(${JSON.stringify(getDockerActionTargets(env))}, ${JSON.stringify(`${data.name} - ${env.name}`)})' title="통합 로그">📚</button>` : ''}
                                     ${(siteEnabled && sitePort) ? `<a class="btn btn-icon btn-primary" href="${absoluteUrlForPortAndPath(siteBaseForLinks, sitePort, sitePath)}" target="_blank" title="사이트 접속">🌐</a>` : ''}
                                 </div>
                             </div>
@@ -2105,7 +2116,8 @@ HTML_TEMPLATE = r'''
                                     ${env.name} · 백엔드
                                 </div>
                                 <div class="env-actions">
-                                    ${data.type === 'docker' ? `<button class="btn btn-icon" onclick='openLogModal(${JSON.stringify(env.target)}, ${JSON.stringify(`${data.name} - ${env.name} · 백엔드`)})' title="콘솔 로그">📜</button>` : ''}
+                                    ${data.type === 'docker' && getBackendLogTarget(env) ? `<button class="btn btn-icon" onclick='openLogModal(${JSON.stringify(getBackendLogTarget(env))}, ${JSON.stringify(`${data.name} - ${env.name} · 백엔드`)})' title="백엔드 로그">📜B</button>` : ''}
+                                    ${data.type === 'docker' && getDockerActionTargets(env).length > 1 ? `<button class="btn btn-icon" onclick='openCombinedLogModal(${JSON.stringify(getDockerActionTargets(env))}, ${JSON.stringify(`${data.name} - ${env.name}`)})' title="통합 로그">📚</button>` : ''}
                                     ${backendPort ? `<a class="btn btn-icon btn-primary" href="${absoluteUrlForPortAndPath(siteBaseForLinks, backendPort, backendPath)}" target="_blank" title="백엔드 접속">🌐</a>` : ''}
                                 </div>
                             </div>
@@ -2244,26 +2256,60 @@ HTML_TEMPLATE = r'''
         
         // 로그 모달
         async function openLogModal(target, title) {
-            currentLogTarget = target;
+            currentLogTarget = { mode: 'single', targets: [target], title };
             document.getElementById('modalTitle').textContent = `${title} 로그 (${target})`;
             document.getElementById('logContent').textContent = '로그를 불러오는 중...';
             document.getElementById('logContent').className = 'log-container loading';
             document.getElementById('logModal').classList.add('show');
-            await fetchLogs(target);
+            await fetchLogs(currentLogTarget);
         }
-        
-        async function fetchLogs(target) {
+
+        async function openCombinedLogModal(targets, title) {
+            const cleanTargets = Array.isArray(targets) ? targets.filter(Boolean) : [];
+            if (!cleanTargets.length) {
+                showToast('표시할 로그 대상이 없습니다.', 'error', 3000);
+                return;
+            }
+            currentLogTarget = { mode: 'multi', targets: cleanTargets, title };
+            document.getElementById('modalTitle').textContent = `${title} 통합 로그`;
+            document.getElementById('logContent').textContent = '통합 로그를 불러오는 중...';
+            document.getElementById('logContent').className = 'log-container loading';
+            document.getElementById('logModal').classList.add('show');
+            await fetchLogs(currentLogTarget);
+        }
+
+        async function fetchLogs(logRequest) {
             const content = document.getElementById('logContent');
             try {
-                const response = await fetch(`/api/logs/${target}`);
-                const data = await response.json();
-                if (data.error) {
-                    content.textContent = `오류: ${data.error}`;
+                if (!logRequest || !Array.isArray(logRequest.targets) || !logRequest.targets.length) {
+                    content.textContent = '로그 대상이 없습니다.';
                     content.className = 'log-container error';
-                } else {
-                    content.textContent = data.logs || '(로그가 비어 있습니다)';
+                    return;
+                }
+                if (logRequest.mode === 'multi' && logRequest.targets.length > 1) {
+                    const sections = await Promise.all(logRequest.targets.map(async (target) => {
+                        const response = await fetch(`/api/logs/${target}`);
+                        const data = await response.json();
+                        if (!response.ok || data.error) {
+                            return `===== ${target} =====\n오류: ${data.error || '로그를 가져오지 못했습니다.'}`;
+                        }
+                        return `===== ${target} =====\n${data.logs || '(로그가 비어 있습니다)'}`;
+                    }));
+                    content.textContent = sections.join('\n\n');
                     content.className = 'log-container';
                     content.scrollTop = content.scrollHeight;
+                } else {
+                    const target = logRequest.targets[0];
+                    const response = await fetch(`/api/logs/${target}`);
+                    const data = await response.json();
+                    if (data.error) {
+                        content.textContent = `오류: ${data.error}`;
+                        content.className = 'log-container error';
+                    } else {
+                        content.textContent = data.logs || '(로그가 비어 있습니다)';
+                        content.className = 'log-container';
+                        content.scrollTop = content.scrollHeight;
+                    }
                 }
             } catch (error) {
                 content.textContent = `로그를 불러올 수 없습니다: ${error.message}`;

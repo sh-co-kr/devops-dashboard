@@ -994,6 +994,22 @@ HTML_TEMPLATE = r'''
         .status-badge.info { background: rgba(88, 166, 255, 0.2); color: var(--accent); }
         
         .panel-actions { display: flex; gap: 10px; align-items: center; }
+
+        .toast {
+            min-width: 260px;
+            max-width: 420px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+            font-size: 0.9rem;
+            line-height: 1.45;
+        }
+        .toast.success { border-left: 4px solid var(--success); }
+        .toast.error { border-left: 4px solid var(--error); }
+        .toast.info { border-left: 4px solid var(--accent); }
         
         /* 환경 그리드 */
         .env-grid {
@@ -1514,6 +1530,8 @@ HTML_TEMPLATE = r'''
             <!-- 초기 로딩: 시스템 상태 -->
         </main>
     </div>
+
+    <div id="toastContainer" style="position: fixed; top: 20px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 10px;"></div>
     
     <!-- 로그 모달 -->
     <div class="modal-overlay" id="logModal" onclick="closeLogModal(event)">
@@ -1725,6 +1743,20 @@ HTML_TEMPLATE = r'''
             if (/^https?:\/\//i.test(path)) return path;
             return origin + (path.startsWith('/') ? path : '/' + path);
         }
+        function showToast(message, type = 'info', durationMs = 3200) {
+            const container = document.getElementById('toastContainer');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            window.setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-4px)';
+                toast.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+                window.setTimeout(() => toast.remove(), 220);
+            }, durationMs);
+        }
         function getDashboardLabel() {
             return `${SITE_HOST_LABEL}:${DASHBOARD_PORT}`;
         }
@@ -1917,6 +1949,7 @@ HTML_TEMPLATE = r'''
         async function dockerAction(target, action, projectName) {
             const labels = { start: '시작', stop: '중지', restart: '재시작' };
             if (!confirm(`컨테이너 "${target}" → ${labels[action] || action} 할까요?`)) return;
+            showToast(`"${target}" ${labels[action] || action} 요청 중...`, 'info', 1800);
             try {
                 const response = await fetch('/api/docker/action', {
                     method: 'POST',
@@ -1925,13 +1958,13 @@ HTML_TEMPLATE = r'''
                 });
                 const res = await response.json();
                 if (!response.ok || res.status === 'error') {
-                    alert(res.error || res.message || '요청 실패');
+                    showToast(res.error || res.message || '요청 실패', 'error', 4200);
                     return;
                 }
-                alert(res.message || '완료');
+                showToast(res.message || '완료', 'success', 3200);
                 await loadProject(projectName);
             } catch (e) {
-                alert('오류: ' + e.message);
+                showToast('오류: ' + e.message, 'error', 4200);
             }
         }
         
@@ -2044,12 +2077,18 @@ HTML_TEMPLATE = r'''
                     const bhCardClass =
                         env.health === 'unhealthy' ? 'unhealthy' :
                         env.health === 'healthy' ? 'running' : 'stopped';
+                    const backendPort = portForBackendCard(env);
+                    const backendPath = env.path || '';
                     return `
                         <div class="env-card ${bhCardClass}">
                             <div class="env-header">
                                 <div class="env-name">
                                     <span class="env-dot ${healthDotClass}"></span>
                                     ${env.name} · 백엔드
+                                </div>
+                                <div class="env-actions">
+                                    ${data.type === 'docker' ? `<button class="btn btn-icon" onclick="openLogModal('${env.target}', '${data.name} - ${env.name} · 백엔드')" title="콘솔 로그">📜</button>` : ''}
+                                    ${backendPort ? `<a class="btn btn-icon btn-primary" href="${absoluteUrlForPortAndPath(siteBaseForLinks, backendPort, backendPath)}" target="_blank" title="백엔드 접속">🌐</a>` : ''}
                                 </div>
                             </div>
                             <div class="env-metrics">
@@ -2060,6 +2099,13 @@ HTML_TEMPLATE = r'''
                                 <div class="env-metric"><span class="label">가동</span><span class="value">${env.uptime}</span></div>
                             </div>
                             <div class="env-target"><span class="label">API</span> :${portForBackendCard(env)}${env.path || ''}</div>
+                            ${data.type === 'docker' && env.target ? `
+                            <div class="env-ctl-btns">
+                                <button type="button" class="btn btn-sm btn-primary" onclick="dockerAction(${JSON.stringify(env.target)}, 'start', ${JSON.stringify(data.name)})">▶ 시작</button>
+                                <button type="button" class="btn btn-sm" onclick="dockerAction(${JSON.stringify(env.target)}, 'stop', ${JSON.stringify(data.name)})">■ 중지</button>
+                                <button type="button" class="btn btn-sm" onclick="dockerAction(${JSON.stringify(env.target)}, 'restart', ${JSON.stringify(data.name)})">↻ 재시작</button>
+                            </div>
+                            ` : ''}
                         </div>
                     `;
                 };

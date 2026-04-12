@@ -11,6 +11,7 @@ pipeline {
     PROJECT_DIR = "${WORKSPACE}"
     DEPLOY_DIR = "${PROJECT_DIR}/deploy"
     DEVOPS_DASHBOARD_REPO_ROOT = "${PROJECT_DIR}"
+    CANONICAL_DEPLOY_DIR = "/home/user/sh-co-kr/apps/devops-dashboard/deploy"
   }
 
   stages {
@@ -57,6 +58,11 @@ pipeline {
         dir("${DEPLOY_DIR}") {
           sh '''
             set -eux
+            cp "${CANONICAL_DEPLOY_DIR}/.env.prod" "${DEPLOY_DIR}/.env.prod"
+            cp "${CANONICAL_DEPLOY_DIR}/.env.dev" "${DEPLOY_DIR}/.env.dev"
+            if [ -f "${CANONICAL_DEPLOY_DIR}/.env.local" ]; then
+              cp "${CANONICAL_DEPLOY_DIR}/.env.local" "${DEPLOY_DIR}/.env.local"
+            fi
             if docker compose version >/dev/null 2>&1; then
               COMPOSE_CMD="docker compose"
             else
@@ -98,12 +104,17 @@ pipeline {
   post {
     always {
       dir("${DEPLOY_DIR}") {
-        sh '''
-          if docker compose version >/dev/null 2>&1; then
-            COMPOSE_CMD="docker compose"
-          else
-            COMPOSE_CMD="docker-compose"
-          fi
+          sh '''
+            cp "${CANONICAL_DEPLOY_DIR}/.env.prod" "${DEPLOY_DIR}/.env.prod" || true
+            cp "${CANONICAL_DEPLOY_DIR}/.env.dev" "${DEPLOY_DIR}/.env.dev" || true
+            if [ -f "${CANONICAL_DEPLOY_DIR}/.env.local" ]; then
+              cp "${CANONICAL_DEPLOY_DIR}/.env.local" "${DEPLOY_DIR}/.env.local" || true
+            fi
+            if docker compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="docker compose"
+            else
+              COMPOSE_CMD="docker-compose"
+            fi
           $COMPOSE_CMD -f docker-compose.yml logs --no-color --tail=120 || true
         '''
       }

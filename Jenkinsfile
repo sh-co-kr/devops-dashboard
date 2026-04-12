@@ -109,6 +109,7 @@ pipeline {
               COMPOSE_CMD="docker-compose"
             fi
           $COMPOSE_CMD -f docker-compose.yml logs --no-color --tail=120 || true
+          chown -R 1000:1000 "${CANONICAL_PROJECT_DIR}" || true
         '''
       }
     }

@@ -59,7 +59,7 @@ pipeline {
         dir("${PROJECT_DIR}") {
           sh '''
             set -eux
-            rsync -a --delete --exclude '.git/' "${PROJECT_DIR}/" "${CANONICAL_PROJECT_DIR}/"
+            cp -a "${PROJECT_DIR}/." "${CANONICAL_PROJECT_DIR}/"
             if docker compose version >/dev/null 2>&1; then
               COMPOSE_CMD="docker compose"
             else

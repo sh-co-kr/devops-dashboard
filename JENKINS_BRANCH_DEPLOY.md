@@ -33,7 +33,7 @@
 1. Job 종류는 `Multibranch Pipeline` 사용
 2. Branch Source는 GitHub 저장소 `sh-co-kr/devops-dashboard`
 3. Discover branches 전략은 최소 `main`, `develop`를 포함해야 함
-4. Script Path는 `apps/devops-dashboard/Jenkinsfile`
+4. Script Path는 `Jenkinsfile`
 5. Scan by webhook 사용 시 GitHub webhook 이벤트는 `push` 기준으로 설정
 
 ## Jenkins UI 클릭 순서
@@ -47,7 +47,7 @@
 6. Credentials가 필요하면 GitHub 토큰 연결
 7. `Behaviors`에서 브랜치 탐색 정책 확인
    `main`, `develop`가 스캔 대상이어야 함
-8. `Build Configuration`의 `Script Path`를 `apps/devops-dashboard/Jenkinsfile`로 입력
+8. `Build Configuration`의 `Script Path`를 `Jenkinsfile`로 입력
 9. `Scan Multibranch Pipeline Triggers`에서 webhook 기반 스캔 사용
 10. `Save`
 11. Job 화면에서 `Scan Repository Now`

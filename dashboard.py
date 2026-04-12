@@ -2033,7 +2033,7 @@ HTML_TEMPLATE = r'''
                                     ${env.name}
                                 </div>
                                 <div class="env-actions">
-                                    ${data.type === 'docker' ? `<button class="btn btn-icon" onclick="openLogModal('${env.target}', '${data.name} - ${env.name}')" title="콘솔 로그">📜</button>` : ''}
+                                    ${data.type === 'docker' ? `<button class="btn btn-icon" onclick='openLogModal(${JSON.stringify(env.target)}, ${JSON.stringify(`${data.name} - ${env.name}`)})' title="콘솔 로그">📜</button>` : ''}
                                     ${(siteEnabled && sitePort) ? `<a class="btn btn-icon btn-primary" href="${absoluteUrlForPortAndPath(siteBaseForLinks, sitePort, sitePath)}" target="_blank" title="사이트 접속">🌐</a>` : ''}
                                 </div>
                             </div>
@@ -2052,9 +2052,9 @@ HTML_TEMPLATE = r'''
                             <div class="env-target"><span class="label">Target:</span> ${env.target}</div>
                             ${data.type === 'docker' && env.target ? `
                             <div class="env-ctl-btns">
-                                <button type="button" class="btn btn-sm btn-primary" onclick="dockerAction(${JSON.stringify(env.target)}, 'start', ${JSON.stringify(data.name)})">▶ 시작</button>
-                                <button type="button" class="btn btn-sm" onclick="dockerAction(${JSON.stringify(env.target)}, 'stop', ${JSON.stringify(data.name)})">■ 중지</button>
-                                <button type="button" class="btn btn-sm" onclick="dockerAction(${JSON.stringify(env.target)}, 'restart', ${JSON.stringify(data.name)})">↻ 재시작</button>
+                                <button type="button" class="btn btn-sm btn-primary" onclick='dockerAction(${JSON.stringify(env.target)}, "start", ${JSON.stringify(data.name)})'>▶ 시작</button>
+                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env.target)}, "stop", ${JSON.stringify(data.name)})'>■ 중지</button>
+                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env.target)}, "restart", ${JSON.stringify(data.name)})'>↻ 재시작</button>
                             </div>
                             ` : ''}
                         </div>
@@ -2087,7 +2087,7 @@ HTML_TEMPLATE = r'''
                                     ${env.name} · 백엔드
                                 </div>
                                 <div class="env-actions">
-                                    ${data.type === 'docker' ? `<button class="btn btn-icon" onclick="openLogModal('${env.target}', '${data.name} - ${env.name} · 백엔드')" title="콘솔 로그">📜</button>` : ''}
+                                    ${data.type === 'docker' ? `<button class="btn btn-icon" onclick='openLogModal(${JSON.stringify(env.target)}, ${JSON.stringify(`${data.name} - ${env.name} · 백엔드`)})' title="콘솔 로그">📜</button>` : ''}
                                     ${backendPort ? `<a class="btn btn-icon btn-primary" href="${absoluteUrlForPortAndPath(siteBaseForLinks, backendPort, backendPath)}" target="_blank" title="백엔드 접속">🌐</a>` : ''}
                                 </div>
                             </div>
@@ -2101,9 +2101,9 @@ HTML_TEMPLATE = r'''
                             <div class="env-target"><span class="label">API</span> :${portForBackendCard(env)}${env.path || ''}</div>
                             ${data.type === 'docker' && env.target ? `
                             <div class="env-ctl-btns">
-                                <button type="button" class="btn btn-sm btn-primary" onclick="dockerAction(${JSON.stringify(env.target)}, 'start', ${JSON.stringify(data.name)})">▶ 시작</button>
-                                <button type="button" class="btn btn-sm" onclick="dockerAction(${JSON.stringify(env.target)}, 'stop', ${JSON.stringify(data.name)})">■ 중지</button>
-                                <button type="button" class="btn btn-sm" onclick="dockerAction(${JSON.stringify(env.target)}, 'restart', ${JSON.stringify(data.name)})">↻ 재시작</button>
+                                <button type="button" class="btn btn-sm btn-primary" onclick='dockerAction(${JSON.stringify(env.target)}, "start", ${JSON.stringify(data.name)})'>▶ 시작</button>
+                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env.target)}, "stop", ${JSON.stringify(data.name)})'>■ 중지</button>
+                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env.target)}, "restart", ${JSON.stringify(data.name)})'>↻ 재시작</button>
                             </div>
                             ` : ''}
                         </div>

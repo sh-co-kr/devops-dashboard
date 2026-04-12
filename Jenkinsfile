@@ -11,6 +11,7 @@ pipeline {
     PROJECT_DIR = "${WORKSPACE}"
     DEPLOY_DIR = "${PROJECT_DIR}/deploy"
     DEVOPS_DASHBOARD_REPO_ROOT = "${PROJECT_DIR}"
+    CANONICAL_PROJECT_DIR = "/home/user/sh-co-kr/apps/devops-dashboard"
     CANONICAL_DEPLOY_DIR = "/home/user/sh-co-kr/apps/devops-dashboard/deploy"
   }
 
@@ -55,20 +56,17 @@ pipeline {
         expression { return env.TARGET_ENV?.trim() }
       }
       steps {
-        dir("${DEPLOY_DIR}") {
+        dir("${PROJECT_DIR}") {
           sh '''
             set -eux
-            cp "${CANONICAL_DEPLOY_DIR}/.env.prod" "${DEPLOY_DIR}/.env.prod"
-            cp "${CANONICAL_DEPLOY_DIR}/.env.dev" "${DEPLOY_DIR}/.env.dev"
-            if [ -f "${CANONICAL_DEPLOY_DIR}/.env.local" ]; then
-              cp "${CANONICAL_DEPLOY_DIR}/.env.local" "${DEPLOY_DIR}/.env.local"
-            fi
+            rsync -a --delete --exclude '.git/' "${PROJECT_DIR}/" "${CANONICAL_PROJECT_DIR}/"
             if docker compose version >/dev/null 2>&1; then
               COMPOSE_CMD="docker compose"
             else
               COMPOSE_CMD="docker-compose"
             fi
-            export DEVOPS_DASHBOARD_REPO_ROOT="${DEVOPS_DASHBOARD_REPO_ROOT}"
+            export DEVOPS_DASHBOARD_REPO_ROOT="${CANONICAL_PROJECT_DIR}"
+            cd "${CANONICAL_DEPLOY_DIR}"
             $COMPOSE_CMD -f docker-compose.yml build ${DEPLOY_SERVICE}
             $COMPOSE_CMD -f docker-compose.yml up -d ${DEPLOY_SERVICE}
             $COMPOSE_CMD -f docker-compose.yml ps
@@ -82,7 +80,7 @@ pipeline {
         expression { return env.TARGET_ENV?.trim() }
       }
       steps {
-        dir("${DEPLOY_DIR}") {
+        dir("${CANONICAL_DEPLOY_DIR}") {
           sh '''
             set -eux
             if docker compose version >/dev/null 2>&1; then
@@ -91,10 +89,17 @@ pipeline {
               COMPOSE_CMD="docker-compose"
             fi
             if [ "${TARGET_ENV}" = "prod" ]; then
-              curl -fsS http://127.0.0.1:7110/ >/dev/null
+              for i in 1 2 3 4 5 6 7 8 9 10; do
+                curl -fsS http://127.0.0.1:7110/ >/dev/null && exit 0
+                sleep 3
+              done
             elif [ "${TARGET_ENV}" = "dev" ]; then
-              curl -fsS http://127.0.0.1:7111/ >/dev/null
+              for i in 1 2 3 4 5 6 7 8 9 10; do
+                curl -fsS http://127.0.0.1:7111/ >/dev/null && exit 0
+                sleep 3
+              done
             fi
+            exit 1
           '''
         }
       }
@@ -103,13 +108,8 @@ pipeline {
 
   post {
     always {
-      dir("${DEPLOY_DIR}") {
+      dir("${CANONICAL_DEPLOY_DIR}") {
           sh '''
-            cp "${CANONICAL_DEPLOY_DIR}/.env.prod" "${DEPLOY_DIR}/.env.prod" || true
-            cp "${CANONICAL_DEPLOY_DIR}/.env.dev" "${DEPLOY_DIR}/.env.dev" || true
-            if [ -f "${CANONICAL_DEPLOY_DIR}/.env.local" ]; then
-              cp "${CANONICAL_DEPLOY_DIR}/.env.local" "${DEPLOY_DIR}/.env.local" || true
-            fi
             if docker compose version >/dev/null 2>&1; then
               COMPOSE_CMD="docker compose"
             else

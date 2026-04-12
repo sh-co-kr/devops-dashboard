@@ -1,6 +1,219 @@
 {
+  "B-Side": {
+    "environments": [
+      {
+        "name": "Prod",
+        "port": 7070,
+        "target": "b-side-prod"
+      },
+      {
+        "name": "Dev",
+        "port": 7071,
+        "target": "b-side-dev"
+      }
+    ],
+    "type": "docker"
+  },
+  "Blog Persona": {
+    "environments": [
+      {
+        "name": "Prod",
+        "port": 7090,
+        "target": "blog-persona-prod"
+      },
+      {
+        "name": "Dev",
+        "port": 7091,
+        "target": "blog-persona-dev"
+      }
+    ],
+    "type": "docker"
+  },
+  "DD-WAY (배포 이미지)": {
+    "environments": [
+      {
+        "name": "Prod",
+        "port": 7020,
+        "target": "DD-WAY-prod"
+      },
+      {
+        "name": "Dev",
+        "port": 7021,
+        "target": "DD-WAY-dev"
+      }
+    ],
+    "type": "docker"
+  },
+  "DD-WAY-1": {
+    "environments": [
+      {
+        "name": "스택 · 프론트",
+        "port": 3000,
+        "target": "dd-way-frontend"
+      },
+      {
+        "name": "스택 · API",
+        "port": 8081,
+        "target": "dd-way-backend"
+      }
+    ],
+    "type": "docker"
+  },
+  "DevOps 대시보드": {
+    "environments": [
+      {
+        "name": "Prod (7110)",
+        "port": 7110,
+        "target": "devops-dashboard-prod"
+      },
+      {
+        "name": "Dev (7111)",
+        "port": 7111,
+        "target": "devops-dashboard-dev"
+      }
+    ],
+    "type": "docker"
+  },
+  "Nong-Project": {
+    "environments": [
+      {
+        "name": "Prod",
+        "port": 7030,
+        "target": "Nong-Project-prod"
+      },
+      {
+        "name": "Dev",
+        "port": 7031,
+        "target": "Nong-Project-dev"
+      }
+    ],
+    "type": "docker"
+  },
+  "album-color-recommender": {
+    "environments": [
+      {
+        "name": "Prod",
+        "port": 7040,
+        "target": "album-color-recommender-prod"
+      },
+      {
+        "name": "Dev",
+        "port": 7041,
+        "target": "album-color-recommender-dev"
+      }
+    ],
+    "type": "docker"
+  },
+  "artist-curation-monitor": {
+    "environments": [
+      {
+        "name": "Prod",
+        "port": 7050,
+        "target": "artist-curation-monitor-prod"
+      },
+      {
+        "name": "Dev",
+        "port": 7051,
+        "target": "artist-curation-monitor-dev"
+      }
+    ],
+    "type": "docker"
+  },
+  "artist-feed-board": {
+    "environments": [
+      {
+        "name": "Prod",
+        "port": 7060,
+        "target": "artist-feed-board-prod"
+      },
+      {
+        "name": "Dev",
+        "port": 7061,
+        "target": "artist-feed-board-dev"
+      }
+    ],
+    "type": "docker"
+  },
+  "barocut": {
+    "environments": [
+      {
+        "control_targets": [
+          "barocut-front-prod"
+        ],
+        "name": "Prod",
+        "path": "/api/health",
+        "port": 7085,
+        "site_path": "/",
+        "site_port": 7080,
+        "target": "barocut-prod"
+      },
+      {
+        "control_targets": [
+          "barocut-front-dev"
+        ],
+        "name": "Dev",
+        "path": "/api/health",
+        "port": 7086,
+        "site_path": "/",
+        "site_port": 7081,
+        "target": "barocut-dev"
+      }
+    ],
+    "type": "docker"
+  },
+  "dashboard_settings": {
+    "quick_links": [
+      {
+        "icon": "📡",
+        "port": 9080,
+        "title": "공유기 관리자"
+      },
+      {
+        "icon": "👷",
+        "port": 9090,
+        "title": "Jenkins 서버"
+      },
+      {
+        "icon": "🐙",
+        "label": "github.com/sh-co-kr",
+        "title": "GitHub 프로필",
+        "url": "https://github.com/sh-co-kr"
+      }
+    ],
+    "site_base_url": "http://suho0213.iptime.org",
+    "site_host_label": "suho0213.iptime.org"
+  },
+  "korea-search-trend": {
+    "environments": [
+      {
+        "name": "Prod",
+        "port": 7120,
+        "target": "korea-search-trend-prod"
+      },
+      {
+        "name": "Dev",
+        "port": 7121,
+        "target": "korea-search-trend-dev"
+      }
+    ],
+    "type": "docker"
+  },
+  "obsidian-repo": {
+    "environments": [
+      {
+        "name": "Prod",
+        "port": 7140,
+        "target": "obsidian-repo-prod"
+      },
+      {
+        "name": "Dev",
+        "port": 7141,
+        "target": "obsidian-repo-dev"
+      }
+    ],
+    "type": "docker"
+  },
   "project_name_mapping": {
-    "BotBySlack": "슬랙 봇 Docker",
     "DD-WAY": "DD-WAY-1",
     "Nong-Project": "Nong-Project",
     "album-color-recommender": "album-color-recommender",
@@ -12,8 +225,7 @@
     "jenkins_server": "젠킨스 서버",
     "korea-search-trend": "korea-search-trend",
     "meeting-compass": "미팅 집중도 테스트",
-    "obsidian-repo": "obsidian-repo",
-    "slack-bot-project": "슬랙 봇"
+    "obsidian-repo": "obsidian-repo"
   },
   "project_order": [
     "DevOps 대시보드",
@@ -26,157 +238,66 @@
     "barocut",
     "B-Side",
     "Blog Persona",
-    "슬랙 봇 Docker",
     "코난 프로젝트",
     "DD-WAY-1",
     "DD-WAY (배포 이미지)",
     "korea-search-trend",
     "미팅 집중도 테스트",
     "obsidian-repo",
-    "sh-co-kr-infra",
-    "슬랙 봇"
+    "sh-co-kr-infra"
   ],
-  "dashboard_settings": {
-    "site_base_url": "http://suho0213.iptime.org",
-    "site_host_label": "suho0213.iptime.org",
-    "quick_links": [
-      { "title": "공유기 관리자", "icon": "📡", "port": 9080 },
-      { "title": "Jenkins 서버", "icon": "👷", "port": 9090 },
-      { "title": "GitHub 프로필", "icon": "🐙", "url": "https://github.com/sh-co-kr", "label": "github.com/sh-co-kr" },
-      { "title": "Linear", "icon": "⚡", "url": "https://linear.app/dev-sh/", "label": "linear.app/dev-sh" },
-      { "title": "DD-WAY Frontend", "icon": "🌐", "port": 3000 },
-      { "title": "Meeting Compass (배포)", "icon": "🧭", "port": 7130 }
-    ]
-  },
-  "DevOps 대시보드": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod (7110)", "port": 7110, "target": "devops-dashboard-prod" },
-      { "name": "Dev (7111)", "port": 7111, "target": "devops-dashboard-dev" }
-    ]
-  },
-  "젠킨스 서버": {
-    "type": "docker",
-    "environments": [
-      { "name": "Jenkins", "port": 9090, "target": "jenkins" }
-    ]
+  "sh-co-kr-infra": {
+    "description": "인프라 전체 로그 아카이브",
+    "type": "info"
   },
   "web-app": {
-    "type": "docker",
-    "environments": [
-      { "name": "Nginx", "port": 8001, "target": "web-app" }
-    ]
-  },
-  "Nong-Project": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7030, "target": "Nong-Project-prod" },
-      { "name": "Dev", "port": 7031, "target": "Nong-Project-dev" }
-    ]
-  },
-  "album-color-recommender": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7040, "target": "album-color-recommender-prod" },
-      { "name": "Dev", "port": 7041, "target": "album-color-recommender-dev" }
-    ]
-  },
-  "artist-curation-monitor": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7050, "target": "artist-curation-monitor-prod" },
-      { "name": "Dev", "port": 7051, "target": "artist-curation-monitor-dev" }
-    ]
-  },
-  "artist-feed-board": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7060, "target": "artist-feed-board-prod" },
-      { "name": "Dev", "port": 7061, "target": "artist-feed-board-dev" }
-    ]
-  },
-  "barocut": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7085, "target": "barocut-prod", "control_targets": ["barocut-front-prod"], "path": "/api/health", "site_port": 7080, "site_path": "/" },
-      { "name": "Dev", "port": 7086, "target": "barocut-dev", "control_targets": ["barocut-front-dev"], "path": "/api/health", "site_port": 7081, "site_path": "/" }
-    ]
-  },
-  "B-Side": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7070, "target": "b-side-prod" },
-      { "name": "Dev", "port": 7071, "target": "b-side-dev" }
-    ]
-  },
-  "Blog Persona": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7090, "target": "blog-persona-prod" },
-      { "name": "Dev", "port": 7091, "target": "blog-persona-dev" }
-    ]
-  },
-  "슬랙 봇 Docker": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7010, "target": "BotBySlack-prod" },
-      { "name": "Dev", "port": 7011, "target": "BotBySlack-dev" }
-    ]
-  },
-  "코난 프로젝트": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7100, "target": "conan-project-prod" },
-      { "name": "Dev", "port": 7101, "target": "conan-project-dev" }
-    ]
-  },
-  "DD-WAY-1": {
-    "type": "docker",
-    "environments": [
-      { "name": "스택 · 프론트", "port": 3000, "target": "dd-way-frontend" },
-      { "name": "스택 · API", "port": 8081, "target": "dd-way-backend" }
-    ]
-  },
-  "DD-WAY (배포 이미지)": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7020, "target": "DD-WAY-prod" },
-      { "name": "Dev", "port": 7021, "target": "DD-WAY-dev" }
-    ]
-  },
-  "korea-search-trend": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7120, "target": "korea-search-trend-prod" },
-      { "name": "Dev", "port": 7121, "target": "korea-search-trend-dev" }
-    ]
-  },
-  "미팅 집중도 테스트": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7130, "target": "meeting-compass-prod" },
-      { "name": "Dev", "port": 7131, "target": "meeting-compass-dev" }
-    ]
-  },
-  "obsidian-repo": {
-    "type": "docker",
-    "environments": [
-      { "name": "Prod", "port": 7140, "target": "obsidian-repo-prod" },
-      { "name": "Dev", "port": 7141, "target": "obsidian-repo-dev" }
-    ]
-  },
-  "sh-co-kr-infra": {
-    "type": "info",
-    "description": "인프라 전체 로그 아카이브"
-  },
-  "slack-bot-project": {
-    "type": "process",
     "environments": [
       {
-        "keyword": "slack_bot",
-        "name": "Local Bot",
-        "target": "python"
+        "name": "Nginx",
+        "port": 8001,
+        "target": "web-app"
       }
-    ]
+    ],
+    "type": "docker"
+  },
+  "미팅 집중도 테스트": {
+    "environments": [
+      {
+        "name": "Prod",
+        "port": 7130,
+        "target": "meeting-compass-prod"
+      },
+      {
+        "name": "Dev",
+        "port": 7131,
+        "target": "meeting-compass-dev"
+      }
+    ],
+    "type": "docker"
+  },
+  "젠킨스 서버": {
+    "environments": [
+      {
+        "name": "Jenkins",
+        "port": 9090,
+        "target": "jenkins"
+      }
+    ],
+    "type": "docker"
+  },
+  "코난 프로젝트": {
+    "environments": [
+      {
+        "name": "Prod",
+        "port": 7100,
+        "target": "conan-project-prod"
+      },
+      {
+        "name": "Dev",
+        "port": 7101,
+        "target": "conan-project-dev"
+      }
+    ],
+    "type": "docker"
   }
 }

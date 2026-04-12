@@ -36,12 +36,42 @@
 4. Script Path는 `apps/devops-dashboard/Jenkinsfile`
 5. Scan by webhook 사용 시 GitHub webhook 이벤트는 `push` 기준으로 설정
 
+## Jenkins UI 클릭 순서
+
+1. Jenkins 메인 화면에서 `New Item`
+2. 이름 입력
+   `devops-dashboard`
+3. `Multibranch Pipeline` 선택 후 `OK`
+4. `Branch Sources`에서 `Add source` -> `GitHub`
+5. Repository는 `https://github.com/sh-co-kr/devops-dashboard.git` 또는 연결된 GitHub source 선택
+6. Credentials가 필요하면 GitHub 토큰 연결
+7. `Behaviors`에서 브랜치 탐색 정책 확인
+   `main`, `develop`가 스캔 대상이어야 함
+8. `Build Configuration`의 `Script Path`를 `apps/devops-dashboard/Jenkinsfile`로 입력
+9. `Scan Multibranch Pipeline Triggers`에서 webhook 기반 스캔 사용
+10. `Save`
+11. Job 화면에서 `Scan Repository Now`
+12. `main`, `develop` 브랜치 Job이 생성되었는지 확인
+
 ## GitHub webhook 권장 설정
 
 1. Payload URL: `https://<jenkins-host>/github-webhook/`
 2. Content type: `application/json`
 3. 이벤트: `Just the push event`
 4. GitHub 저장소에 실제 `main`, `develop` 브랜치가 있어야 함
+
+## GitHub UI 클릭 순서
+
+1. GitHub 저장소로 이동
+2. `Settings` -> `Webhooks`
+3. `Add webhook`
+4. Payload URL에 `https://<jenkins-host>/github-webhook/` 입력
+5. Content type은 `application/json`
+6. Secret이 있으면 Jenkins와 동일한 값 입력
+7. 이벤트는 `Just the push event`
+8. `Active` 체크
+9. `Add webhook`
+10. 저장 후 `Recent Deliveries`에서 `200` 응답 확인
 
 ## 권장 운영 방식
 
@@ -63,7 +93,7 @@ curl -fsS http://127.0.0.1:7111/ >/dev/null
 ```bash
 cd /home/user/sh-co-kr/apps/devops-dashboard
 git checkout main
-git checkout -b develop
+git checkout develop
 git push -u origin develop
 git checkout main
 ```

@@ -98,8 +98,8 @@
   "barocut": {
     "type": "docker",
     "environments": [
-      { "name": "Prod", "port": 7085, "target": "barocut-prod", "path": "/api/health", "site_port": 7080, "site_path": "/" },
-      { "name": "Dev", "port": 7086, "target": "barocut-dev", "path": "/api/health", "site_port": 7081, "site_path": "/" }
+      { "name": "Prod", "port": 7085, "target": "barocut-prod", "control_targets": ["barocut-front-prod"], "path": "/api/health", "site_port": 7080, "site_path": "/" },
+      { "name": "Dev", "port": 7086, "target": "barocut-dev", "control_targets": ["barocut-front-dev"], "path": "/api/health", "site_port": 7081, "site_path": "/" }
     ]
   },
   "B-Side": {

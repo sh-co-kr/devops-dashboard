@@ -251,6 +251,10 @@ def collect_docker_targets_from_config(config: dict) -> set:
             t = (env.get('target') or '').strip()
             if t:
                 allowed.add(t)
+            for extra in env.get('control_targets', []) or []:
+                extra_name = str(extra or '').strip()
+                if extra_name:
+                    allowed.add(extra_name)
     return allowed
 
 
@@ -574,6 +578,7 @@ def get_project_status(project_name: str, project_config: dict, force_refresh: b
         env_status = {
             'name': env.get('name', 'Default'),
             'target': env.get('target', ''),
+            'control_targets': env.get('control_targets', []) or [],
             'port': env.get('port'),
             'keyword': env.get('keyword', ''),
             'path': env.get('path', ''),
@@ -1946,15 +1951,28 @@ HTML_TEMPLATE = r'''
             `;
         }
         
-        async function dockerAction(target, action, projectName) {
+        function getDockerActionTargets(env) {
+            if (!env || typeof env !== 'object') return [];
+            const extras = Array.isArray(env.control_targets) ? env.control_targets : [];
+            const primary = env.target ? [env.target] : [];
+            return [...primary, ...extras].filter(Boolean);
+        }
+
+        async function dockerAction(env, action, projectName) {
             const labels = { start: '시작', stop: '중지', restart: '재시작' };
-            if (!confirm(`컨테이너 "${target}" → ${labels[action] || action} 할까요?`)) return;
-            showToast(`"${target}" ${labels[action] || action} 요청 중...`, 'info', 1800);
+            const targets = getDockerActionTargets(env);
+            if (!targets.length) {
+                showToast('제어할 컨테이너가 설정되지 않았습니다.', 'error', 4200);
+                return;
+            }
+            const targetLabel = targets.length === 1 ? targets[0] : `${targets[0]} 외 ${targets.length - 1}개`;
+            if (!confirm(`컨테이너 "${targetLabel}" → ${labels[action] || action} 할까요?`)) return;
+            showToast(`"${targetLabel}" ${labels[action] || action} 요청 중...`, 'info', 1800);
             try {
                 const response = await fetch('/api/docker/action', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ target, action })
+                    body: JSON.stringify({ targets, action })
                 });
                 const res = await response.json();
                 if (!response.ok || res.status === 'error') {
@@ -2052,9 +2070,9 @@ HTML_TEMPLATE = r'''
                             <div class="env-target"><span class="label">Target:</span> ${env.target}</div>
                             ${data.type === 'docker' && env.target ? `
                             <div class="env-ctl-btns">
-                                <button type="button" class="btn btn-sm btn-primary" onclick='dockerAction(${JSON.stringify(env.target)}, "start", ${JSON.stringify(data.name)})'>▶ 시작</button>
-                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env.target)}, "stop", ${JSON.stringify(data.name)})'>■ 중지</button>
-                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env.target)}, "restart", ${JSON.stringify(data.name)})'>↻ 재시작</button>
+                                <button type="button" class="btn btn-sm btn-primary" onclick='dockerAction(${JSON.stringify(env)}, "start", ${JSON.stringify(data.name)})'>▶ 시작</button>
+                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env)}, "stop", ${JSON.stringify(data.name)})'>■ 중지</button>
+                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env)}, "restart", ${JSON.stringify(data.name)})'>↻ 재시작</button>
                             </div>
                             ` : ''}
                         </div>
@@ -2101,9 +2119,9 @@ HTML_TEMPLATE = r'''
                             <div class="env-target"><span class="label">API</span> :${portForBackendCard(env)}${env.path || ''}</div>
                             ${data.type === 'docker' && env.target ? `
                             <div class="env-ctl-btns">
-                                <button type="button" class="btn btn-sm btn-primary" onclick='dockerAction(${JSON.stringify(env.target)}, "start", ${JSON.stringify(data.name)})'>▶ 시작</button>
-                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env.target)}, "stop", ${JSON.stringify(data.name)})'>■ 중지</button>
-                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env.target)}, "restart", ${JSON.stringify(data.name)})'>↻ 재시작</button>
+                                <button type="button" class="btn btn-sm btn-primary" onclick='dockerAction(${JSON.stringify(env)}, "start", ${JSON.stringify(data.name)})'>▶ 시작</button>
+                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env)}, "stop", ${JSON.stringify(data.name)})'>■ 중지</button>
+                                <button type="button" class="btn btn-sm" onclick='dockerAction(${JSON.stringify(env)}, "restart", ${JSON.stringify(data.name)})'>↻ 재시작</button>
                             </div>
                             ` : ''}
                         </div>
@@ -2880,27 +2898,37 @@ def api_docker_action():
         return jsonify({'status': 'error', 'error': 'Docker 연결 안됨'}), 503
     data = request.get_json(silent=True) or {}
     target = (data.get('target') or '').strip()
+    targets = data.get('targets')
     action = (data.get('action') or '').strip().lower()
     if action not in ('start', 'stop', 'restart'):
         return jsonify({'status': 'error', 'error': 'action은 start, stop, restart 중 하나'}), 400
-    if not target:
-        return jsonify({'status': 'error', 'error': 'target(컨테이너 이름) 필요'}), 400
+    resolved_targets = []
+    if isinstance(targets, list):
+        resolved_targets = [str(t or '').strip() for t in targets if str(t or '').strip()]
+    elif target:
+        resolved_targets = [target]
+    if not resolved_targets:
+        return jsonify({'status': 'error', 'error': 'target 또는 targets(컨테이너 이름) 필요'}), 400
     cfg = load_config()
     allowed = collect_docker_targets_from_config(cfg)
-    if target not in allowed:
-        return jsonify({'status': 'error', 'error': f'설정에 없는 컨테이너: {target}'}), 403
+    disallowed = [name for name in resolved_targets if name not in allowed]
+    if disallowed:
+        return jsonify({'status': 'error', 'error': f'설정에 없는 컨테이너: {", ".join(disallowed)}'}), 403
     try:
-        c = docker_client.containers.get(target)
-        if action == 'start':
-            c.start()
-        elif action == 'stop':
-            c.stop(timeout=15)
-        else:
-            c.restart(timeout=15)
+        action_targets = resolved_targets if action == 'start' else list(reversed(resolved_targets))
+        for target_name in action_targets:
+            c = docker_client.containers.get(target_name)
+            if action == 'start':
+                c.start()
+            elif action == 'stop':
+                c.stop(timeout=15)
+            else:
+                c.restart(timeout=15)
         cache.invalidate()
-        return jsonify({'status': 'ok', 'message': f'{target} {action} 완료'})
+        target_label = resolved_targets[0] if len(resolved_targets) == 1 else f'{resolved_targets[0]} 외 {len(resolved_targets) - 1}개'
+        return jsonify({'status': 'ok', 'message': f'{target_label} {action} 완료'})
     except docker.errors.NotFound:
-        return jsonify({'status': 'error', 'error': f'컨테이너 없음: {target}'}), 404
+        return jsonify({'status': 'error', 'error': f'컨테이너 없음: {target_name}'}), 404
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 

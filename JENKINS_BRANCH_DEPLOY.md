@@ -28,6 +28,21 @@
 4. Jenkins 에이전트에 `docker compose`와 `curl`이 설치되어 있어야 한다.
 5. GitHub webhook 또는 Jenkins SCM polling이 설정되어 있어야 한다.
 
+## Jenkins 멀티브랜치 권장 설정
+
+1. Job 종류는 `Multibranch Pipeline` 사용
+2. Branch Source는 GitHub 저장소 `sh-co-kr/devops-dashboard`
+3. Discover branches 전략은 최소 `main`, `develop`를 포함해야 함
+4. Script Path는 `apps/devops-dashboard/Jenkinsfile`
+5. Scan by webhook 사용 시 GitHub webhook 이벤트는 `push` 기준으로 설정
+
+## GitHub webhook 권장 설정
+
+1. Payload URL: `https://<jenkins-host>/github-webhook/`
+2. Content type: `application/json`
+3. 이벤트: `Just the push event`
+4. GitHub 저장소에 실제 `main`, `develop` 브랜치가 있어야 함
+
 ## 권장 운영 방식
 
 1. `develop` 브랜치에 머지되면 개발 대시보드 `7111`로 자동 반영
@@ -41,6 +56,16 @@ cd /home/user/sh-co-kr/apps/devops-dashboard/deploy
 docker compose -f docker-compose.yml ps
 curl -fsS http://127.0.0.1:7110/ >/dev/null
 curl -fsS http://127.0.0.1:7111/ >/dev/null
+```
+
+## 브랜치 준비
+
+```bash
+cd /home/user/sh-co-kr/apps/devops-dashboard
+git checkout main
+git checkout -b develop
+git push -u origin develop
+git checkout main
 ```
 
 ## 참고

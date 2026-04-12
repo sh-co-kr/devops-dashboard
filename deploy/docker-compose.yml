@@ -1,0 +1,76 @@
+version: "3.9"
+
+services:
+  devops-dashboard_prod:
+    container_name: devops-dashboard-prod
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        APP_ENV: prod
+    env_file:
+      - .env.prod
+    ports:
+      - "7110:7110"
+    environment:
+      - PORT=7110
+      - SCAN_PATH=/workspace
+      - TZ=Asia/Seoul
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DEVOPS_DASHBOARD_REPO_ROOT:-/home/user/sh-co-kr}:/workspace:ro
+      - ../dashboard.py:/app/dashboard.py:ro
+      - ../dashboard_config.json:/app/dashboard_config.json
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  devops-dashboard_dev:
+    container_name: devops-dashboard-dev
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        APP_ENV: dev
+    env_file:
+      - .env.dev
+    ports:
+      - "7111:7111"
+    environment:
+      - PORT=7111
+      - SCAN_PATH=/workspace
+      - TZ=Asia/Seoul
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DEVOPS_DASHBOARD_REPO_ROOT:-/home/user/sh-co-kr}:/workspace:ro
+      - ../dashboard.py:/app/dashboard.py:ro
+      - ../dashboard_config.json:/app/dashboard_config.json
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  devops-dashboard_local:
+    profiles:
+      - local
+    container_name: devops-dashboard-local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        APP_ENV: local
+    env_file:
+      - .env.local
+    ports:
+      - "7112:7112"
+    environment:
+      - PORT=7112
+      - SCAN_PATH=/workspace
+      - TZ=Asia/Seoul
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DEVOPS_DASHBOARD_REPO_ROOT:-/home/user/sh-co-kr}:/workspace:ro
+      - ../dashboard.py:/app/dashboard.py:ro
+      - ../dashboard_config.json:/app/dashboard_config.json
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

@@ -1,0 +1,10 @@
+flask>=2.0.0
+markdown>=3.4.0
+docker>=6.0.0
+psutil>=5.9.0
+
+# OpenTelemetry for SigNoz monitoring
+opentelemetry-distro>=0.45b0
+opentelemetry-exporter-otlp>=1.22.0
+opentelemetry-instrumentation-flask>=0.45b0
+opentelemetry-instrumentation-requests>=0.45b0

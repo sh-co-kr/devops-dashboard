@@ -1,0 +1,20 @@
+services:
+  devops-dashboard:
+    build: .
+    container_name: devops-dashboard
+    restart: unless-stopped
+    ports:
+      - "4040:4040"
+    volumes:
+      # 설정 파일을 볼륨으로 마운트하여 웹에서 수정한 내용이 유지되도록
+      - ./dashboard_config.json:/app/dashboard_config.json
+      # 프로젝트 스캔 경로 (상위 디렉토리)
+      - ../:/workspace:ro
+      # Docker 소켓 마운트 (컨테이너 상태 확인용)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - SCAN_PATH=/workspace
+      - TZ=Asia/Seoul
+      - SITE_BASE_URL=http://suho0213.iptime.org

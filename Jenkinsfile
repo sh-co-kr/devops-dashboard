@@ -57,10 +57,15 @@ pipeline {
         dir("${DEPLOY_DIR}") {
           sh '''
             set -eux
+            if docker compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="docker compose"
+            else
+              COMPOSE_CMD="docker-compose"
+            fi
             export DEVOPS_DASHBOARD_REPO_ROOT="${DEVOPS_DASHBOARD_REPO_ROOT}"
-            docker compose -f docker-compose.yml build ${DEPLOY_SERVICE}
-            docker compose -f docker-compose.yml up -d ${DEPLOY_SERVICE}
-            docker compose -f docker-compose.yml ps
+            $COMPOSE_CMD -f docker-compose.yml build ${DEPLOY_SERVICE}
+            $COMPOSE_CMD -f docker-compose.yml up -d ${DEPLOY_SERVICE}
+            $COMPOSE_CMD -f docker-compose.yml ps
           '''
         }
       }
@@ -74,6 +79,11 @@ pipeline {
         dir("${DEPLOY_DIR}") {
           sh '''
             set -eux
+            if docker compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="docker compose"
+            else
+              COMPOSE_CMD="docker-compose"
+            fi
             if [ "${TARGET_ENV}" = "prod" ]; then
               curl -fsS http://127.0.0.1:7110/ >/dev/null
             elif [ "${TARGET_ENV}" = "dev" ]; then

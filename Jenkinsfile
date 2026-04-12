@@ -98,7 +98,14 @@ pipeline {
   post {
     always {
       dir("${DEPLOY_DIR}") {
-        sh 'docker compose -f docker-compose.yml logs --no-color --tail=120 || true'
+        sh '''
+          if docker compose version >/dev/null 2>&1; then
+            COMPOSE_CMD="docker compose"
+          else
+            COMPOSE_CMD="docker-compose"
+          fi
+          $COMPOSE_CMD -f docker-compose.yml logs --no-color --tail=120 || true
+        '''
       }
     }
   }

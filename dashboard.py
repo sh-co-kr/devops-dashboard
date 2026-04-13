@@ -846,6 +846,7 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
                     'result': result,
                     'timestamp': read_timestamp(build_xml),
                     'build_url': f'{JENKINS_BASE_URL}/job/{quote(job_name, safe="")}/job/{quote(branch_dir.name, safe="")}/{latest.name}/',
+                    'console_url': f'{JENKINS_BASE_URL}/job/{quote(job_name, safe="")}/job/{quote(branch_dir.name, safe="")}/{latest.name}/console',
                 })
     except Exception as e:
         default['error'] = str(e)
@@ -1488,6 +1489,13 @@ HTML_TEMPLATE = r'''
             text-decoration: underline;
         }
 
+        .jenkins-build-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
         .jenkins-toolbar {
             display: flex;
             align-items: center;
@@ -2087,11 +2095,15 @@ HTML_TEMPLATE = r'''
         let currentLogTarget = null;
         let currentFile = null;
         let currentSystemData = null;
+        let baseRunningCount = 0;
+        let baseIssueCount = 0;
         let jenkinsFailuresOnly = localStorage.getItem('jenkinsFailuresOnly') === 'true';
         let jenkinsSearchTerm = localStorage.getItem('jenkinsSearchTerm') || '';
         
         // 초기화
         document.addEventListener('DOMContentLoaded', () => {
+            baseRunningCount = parseInt(document.getElementById('runningCount')?.textContent || '0', 10) || 0;
+            baseIssueCount = parseInt(document.getElementById('issueCount')?.textContent || '0', 10) || 0;
             loadSystemStatus();
             updateCacheAge();
             setInterval(updateCacheAge, 1000);
@@ -2164,14 +2176,29 @@ HTML_TEMPLATE = r'''
                 renderSystemStatus(currentSystemData);
             }
         }
+
+        function syncSystemSummary(failureCount) {
+            const runningEl = document.getElementById('runningCount');
+            const issueEl = document.getElementById('issueCount');
+            if (runningEl) {
+                runningEl.textContent = String(baseRunningCount);
+            }
+            if (issueEl) {
+                const totalIssues = baseIssueCount + (failureCount || 0);
+                issueEl.textContent = String(totalIssues);
+                issueEl.title = failureCount ? `프로젝트 이슈 ${baseIssueCount}건 + Jenkins 실패 ${failureCount}건` : `프로젝트 이슈 ${baseIssueCount}건`;
+            }
+        }
         
         // 시스템 상태 렌더링
         function renderSystemStatus(data) {
             const progressClass = (percent) => percent >= 90 ? 'danger' : percent >= 70 ? 'warning' : '';
+            const jenkins = data.jenkins || {};
+            const allJenkinsJobs = Array.isArray(jenkins.jobs) ? jenkins.jobs : [];
+            const failureCount = allJenkinsJobs.filter(item => !['SUCCESS', 'UNKNOWN'].includes(item.result || 'UNKNOWN')).length;
+            syncSystemSummary(failureCount);
             const renderJenkinsStatus = () => {
-                const jenkins = data.jenkins || {};
-                const allJobs = Array.isArray(jenkins.jobs) ? jenkins.jobs : [];
-                const failureCount = allJobs.filter(item => !['SUCCESS', 'UNKNOWN'].includes(item.result || 'UNKNOWN')).length;
+                const allJobs = allJenkinsJobs;
                 const filteredByStatus = jenkinsFailuresOnly
                     ? allJobs.filter(item => !['SUCCESS', 'UNKNOWN'].includes(item.result || 'UNKNOWN'))
                     : allJobs;
@@ -2220,7 +2247,10 @@ HTML_TEMPLATE = r'''
                                         <span>빌드 시각</span>
                                         <strong>${item.timestamp || '-'}</strong>
                                     </div>
-                                    ${item.build_url ? `<a class="jenkins-build-link" href="${item.build_url}" target="_blank" rel="noopener noreferrer">🔗 Jenkins 빌드 상세</a>` : ''}
+                                    <div class="jenkins-build-links">
+                                        ${item.build_url ? `<a class="jenkins-build-link" href="${item.build_url}" target="_blank" rel="noopener noreferrer">🔗 Jenkins 빌드 상세</a>` : ''}
+                                        ${['FAILURE', 'UNSTABLE', 'ABORTED'].includes(result) && item.console_url ? `<a class="jenkins-build-link" href="${item.console_url}" target="_blank" rel="noopener noreferrer">📜 실패 콘솔</a>` : ''}
+                                    </div>
                                 </div>
                             `;
                         }).join('')}
@@ -2313,7 +2343,7 @@ HTML_TEMPLATE = r'''
                                     <div class="jenkins-summary-badge ${failureCount ? 'alert' : ''}">${failureCount ? `실패 ${failureCount}건` : '실패 없음'}</div>
                                     <input class="jenkins-search-input" type="text" placeholder="프로젝트/브랜치 검색" value="${jenkinsSearchTerm}" oninput="updateJenkinsSearch(this.value)">
                                     <button class="jenkins-filter-btn ${jenkinsFailuresOnly ? 'active' : ''}" onclick="toggleJenkinsFailuresOnly()">${jenkinsFailuresOnly ? '전체 보기' : '실패만 보기'}</button>
-                                    <div class="card-value ${(data.jenkins && data.jenkins.healthy) ? '' : 'warning'}">${(data.jenkins && data.jenkins.healthy) ? '정상' : '확인 필요'}</div>
+                                    <div class="card-value ${(jenkins && jenkins.healthy) ? '' : 'warning'}">${(jenkins && jenkins.healthy) ? '정상' : '확인 필요'}</div>
                                 </div>
                             </div>
                             ${renderJenkinsStatus()}

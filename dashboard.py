@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from flask import Flask, render_template_string, request, jsonify
 
 # 선택적 라이브러리 임포트
@@ -178,6 +178,7 @@ def resolve_jenkins_home() -> Path:
 
 JENKINS_HOME = resolve_jenkins_home()
 JENKINS_JOBS_DIR = JENKINS_HOME / 'jobs'
+JENKINS_BASE_URL = os.environ.get('JENKINS_BASE_URL', 'http://suho0213.iptime.org:9090').rstrip('/')
 
 IGNORE_PATTERNS = [
     'venv', 'node_modules', '.git', '__pycache__', '.next',
@@ -757,6 +758,17 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
         ('DD-WAY', ['main', 'develop', 'feature']),
     ]
 
+    def result_priority(result: str) -> int:
+        priorities = {
+            'FAILURE': 0,
+            'ABORTED': 1,
+            'UNSTABLE': 2,
+            'MISSING': 3,
+            'UNKNOWN': 4,
+            'SUCCESS': 5,
+        }
+        return priorities.get((result or 'UNKNOWN').upper(), 4)
+
     def read_result(build_xml: Path) -> str:
         try:
             text = build_xml.read_text(encoding='utf-8', errors='ignore')
@@ -815,12 +827,19 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
                     'branch': branch_dir.name,
                     'build': latest.name,
                     'result': result,
+                    'build_url': f'{JENKINS_BASE_URL}/job/{quote(job_name, safe="")}/job/{quote(branch_dir.name, safe="")}/{latest.name}/',
                 })
     except Exception as e:
         default['error'] = str(e)
         default['healthy'] = False
         cache.set(cache_key, default)
         return default
+
+    jobs.sort(key=lambda item: (
+        result_priority(item.get('result')),
+        item.get('job', '').lower(),
+        item.get('branch', '').lower(),
+    ))
 
     unhealthy = any(item['result'] not in ('SUCCESS', 'UNKNOWN') for item in jobs)
     result = {'jobs': jobs, 'error': None, 'healthy': not unhealthy}
@@ -1422,6 +1441,21 @@ HTML_TEMPLATE = r'''
             align-items: center;
             font-size: 0.78rem;
             color: var(--text-secondary);
+        }
+
+        .jenkins-build-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 10px;
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .jenkins-build-link:hover {
+            text-decoration: underline;
         }
 
         .jenkins-empty {
@@ -2034,6 +2068,10 @@ HTML_TEMPLATE = r'''
             const renderJenkinsStatus = () => {
                 const jenkins = data.jenkins || {};
                 const jobs = Array.isArray(jenkins.jobs) ? jenkins.jobs : [];
+                const branchLabel = (branch) => {
+                    if (!branch) return '-';
+                    return branch.replace(/\.qs[0-9a-z]+$/i, '');
+                };
                 if (!jobs.length) {
                     if (jenkins.error) {
                         return `<div class="jenkins-empty">Jenkins 상태를 읽지 못했습니다: ${jenkins.error}</div>`;
@@ -2050,7 +2088,7 @@ HTML_TEMPLATE = r'''
                                     <div class="jenkins-build-head">
                                         <div>
                                             <div class="jenkins-job-name">${item.job}</div>
-                                            <div class="jenkins-branch-name">${item.branch}</div>
+                                            <div class="jenkins-branch-name">${branchLabel(item.branch)}</div>
                                         </div>
                                         <span class="status-badge ${badgeClass}">${result}</span>
                                     </div>
@@ -2058,6 +2096,7 @@ HTML_TEMPLATE = r'''
                                         <span>최근 빌드</span>
                                         <strong>#${item.build}</strong>
                                     </div>
+                                    ${item.build_url ? `<a class="jenkins-build-link" href="${item.build_url}" target="_blank" rel="noopener noreferrer">🔗 Jenkins 빌드 상세</a>` : ''}
                                 </div>
                             `;
                         }).join('')}

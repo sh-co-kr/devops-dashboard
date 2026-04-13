@@ -782,6 +782,22 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
             pass
         return 'UNKNOWN'
 
+    def read_timestamp(build_xml: Path) -> str | None:
+        try:
+            text = build_xml.read_text(encoding='utf-8', errors='ignore')
+            marker_open = '<timestamp>'
+            marker_close = '</timestamp>'
+            start = text.find(marker_open)
+            end = text.find(marker_close)
+            if start != -1 and end != -1 and end > start:
+                raw = text[start + len(marker_open):end].strip()
+                if raw.isdigit():
+                    ts = int(raw) / 1000
+                    return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
+        except Exception:
+            pass
+        return None
+
     jobs = []
     try:
         for job_name, preferred_branches in tracked_jobs:
@@ -821,12 +837,14 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
                     jobs.append({'job': job_name, 'branch': branch_dir.name, 'build': '-', 'result': 'UNKNOWN'})
                     continue
                 latest = build_dirs[-1]
-                result = read_result(latest / 'build.xml')
+                build_xml = latest / 'build.xml'
+                result = read_result(build_xml)
                 jobs.append({
                     'job': job_name,
                     'branch': branch_dir.name,
                     'build': latest.name,
                     'result': result,
+                    'timestamp': read_timestamp(build_xml),
                     'build_url': f'{JENKINS_BASE_URL}/job/{quote(job_name, safe="")}/job/{quote(branch_dir.name, safe="")}/{latest.name}/',
                 })
     except Exception as e:
@@ -1475,6 +1493,7 @@ HTML_TEMPLATE = r'''
             align-items: center;
             gap: 10px;
             flex-wrap: wrap;
+            justify-content: flex-end;
         }
 
         .jenkins-filter-btn {
@@ -1491,6 +1510,16 @@ HTML_TEMPLATE = r'''
             background: rgba(239, 68, 68, 0.15);
             border-color: rgba(239, 68, 68, 0.45);
             color: #ef4444;
+        }
+
+        .jenkins-search-input {
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-radius: 999px;
+            padding: 7px 12px;
+            font-size: 0.78rem;
+            min-width: 180px;
         }
 
         .jenkins-empty {
@@ -2040,6 +2069,7 @@ HTML_TEMPLATE = r'''
         let currentFile = null;
         let currentSystemData = null;
         let jenkinsFailuresOnly = false;
+        let jenkinsSearchTerm = '';
         
         // 초기화
         document.addEventListener('DOMContentLoaded', () => {
@@ -2106,6 +2136,13 @@ HTML_TEMPLATE = r'''
                 renderSystemStatus(currentSystemData);
             }
         }
+
+        function updateJenkinsSearch(term) {
+            jenkinsSearchTerm = (term || '').trim().toLowerCase();
+            if (currentSystemData) {
+                renderSystemStatus(currentSystemData);
+            }
+        }
         
         // 시스템 상태 렌더링
         function renderSystemStatus(data) {
@@ -2113,14 +2150,23 @@ HTML_TEMPLATE = r'''
             const renderJenkinsStatus = () => {
                 const jenkins = data.jenkins || {};
                 const allJobs = Array.isArray(jenkins.jobs) ? jenkins.jobs : [];
-                const jobs = jenkinsFailuresOnly
+                const filteredByStatus = jenkinsFailuresOnly
                     ? allJobs.filter(item => !['SUCCESS', 'UNKNOWN'].includes(item.result || 'UNKNOWN'))
                     : allJobs;
+                const jobs = filteredByStatus.filter(item => {
+                    if (!jenkinsSearchTerm) return true;
+                    return [item.job, item.branch, item.result, item.build]
+                        .filter(Boolean)
+                        .some(value => String(value).toLowerCase().includes(jenkinsSearchTerm));
+                });
                 const branchLabel = (branch) => {
                     if (!branch) return '-';
                     return branch.replace(/\.qs[0-9a-z]+$/i, '');
                 };
                 if (!jobs.length) {
+                    if (jenkinsSearchTerm && filteredByStatus.length) {
+                        return '<div class="jenkins-empty">검색 결과가 없습니다.</div>';
+                    }
                     if (jenkinsFailuresOnly && allJobs.length) {
                         return '<div class="jenkins-empty">현재 표시할 실패 빌드가 없습니다.</div>';
                     }
@@ -2147,6 +2193,10 @@ HTML_TEMPLATE = r'''
                                     <div class="jenkins-build-meta">
                                         <span>최근 빌드</span>
                                         <strong>#${item.build}</strong>
+                                    </div>
+                                    <div class="jenkins-build-meta">
+                                        <span>빌드 시각</span>
+                                        <strong>${item.timestamp || '-'}</strong>
                                     </div>
                                     ${item.build_url ? `<a class="jenkins-build-link" href="${item.build_url}" target="_blank" rel="noopener noreferrer">🔗 Jenkins 빌드 상세</a>` : ''}
                                 </div>
@@ -2238,6 +2288,7 @@ HTML_TEMPLATE = r'''
                             <div class="card-header">
                                 <div class="card-title"><span class="icon">👷</span>Jenkins 최근 빌드</div>
                                 <div class="jenkins-toolbar">
+                                    <input class="jenkins-search-input" type="text" placeholder="프로젝트/브랜치 검색" value="${jenkinsSearchTerm}" oninput="updateJenkinsSearch(this.value)">
                                     <button class="jenkins-filter-btn ${jenkinsFailuresOnly ? 'active' : ''}" onclick="toggleJenkinsFailuresOnly()">${jenkinsFailuresOnly ? '전체 보기' : '실패만 보기'}</button>
                                     <div class="card-value ${(data.jenkins && data.jenkins.healthy) ? '' : 'warning'}">${(data.jenkins && data.jenkins.healthy) ? '정상' : '확인 필요'}</div>
                                 </div>

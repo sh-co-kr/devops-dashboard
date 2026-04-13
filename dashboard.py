@@ -1496,6 +1496,25 @@ HTML_TEMPLATE = r'''
             justify-content: flex-end;
         }
 
+        .jenkins-summary-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .jenkins-summary-badge.alert {
+            background: rgba(239, 68, 68, 0.14);
+            border-color: rgba(239, 68, 68, 0.45);
+            color: #ef4444;
+        }
+
         .jenkins-filter-btn {
             border: 1px solid var(--border);
             background: var(--bg-tertiary);
@@ -2068,8 +2087,8 @@ HTML_TEMPLATE = r'''
         let currentLogTarget = null;
         let currentFile = null;
         let currentSystemData = null;
-        let jenkinsFailuresOnly = false;
-        let jenkinsSearchTerm = '';
+        let jenkinsFailuresOnly = localStorage.getItem('jenkinsFailuresOnly') === 'true';
+        let jenkinsSearchTerm = localStorage.getItem('jenkinsSearchTerm') || '';
         
         // 초기화
         document.addEventListener('DOMContentLoaded', () => {
@@ -2132,6 +2151,7 @@ HTML_TEMPLATE = r'''
 
         function toggleJenkinsFailuresOnly() {
             jenkinsFailuresOnly = !jenkinsFailuresOnly;
+            localStorage.setItem('jenkinsFailuresOnly', String(jenkinsFailuresOnly));
             if (currentSystemData) {
                 renderSystemStatus(currentSystemData);
             }
@@ -2139,6 +2159,7 @@ HTML_TEMPLATE = r'''
 
         function updateJenkinsSearch(term) {
             jenkinsSearchTerm = (term || '').trim().toLowerCase();
+            localStorage.setItem('jenkinsSearchTerm', jenkinsSearchTerm);
             if (currentSystemData) {
                 renderSystemStatus(currentSystemData);
             }
@@ -2150,6 +2171,7 @@ HTML_TEMPLATE = r'''
             const renderJenkinsStatus = () => {
                 const jenkins = data.jenkins || {};
                 const allJobs = Array.isArray(jenkins.jobs) ? jenkins.jobs : [];
+                const failureCount = allJobs.filter(item => !['SUCCESS', 'UNKNOWN'].includes(item.result || 'UNKNOWN')).length;
                 const filteredByStatus = jenkinsFailuresOnly
                     ? allJobs.filter(item => !['SUCCESS', 'UNKNOWN'].includes(item.result || 'UNKNOWN'))
                     : allJobs;
@@ -2288,6 +2310,7 @@ HTML_TEMPLATE = r'''
                             <div class="card-header">
                                 <div class="card-title"><span class="icon">👷</span>Jenkins 최근 빌드</div>
                                 <div class="jenkins-toolbar">
+                                    <div class="jenkins-summary-badge ${failureCount ? 'alert' : ''}">${failureCount ? `실패 ${failureCount}건` : '실패 없음'}</div>
                                     <input class="jenkins-search-input" type="text" placeholder="프로젝트/브랜치 검색" value="${jenkinsSearchTerm}" oninput="updateJenkinsSearch(this.value)">
                                     <button class="jenkins-filter-btn ${jenkinsFailuresOnly ? 'active' : ''}" onclick="toggleJenkinsFailuresOnly()">${jenkinsFailuresOnly ? '전체 보기' : '실패만 보기'}</button>
                                     <div class="card-value ${(data.jenkins && data.jenkins.healthy) ? '' : 'warning'}">${(data.jenkins && data.jenkins.healthy) ? '정상' : '확인 필요'}</div>

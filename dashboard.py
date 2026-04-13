@@ -1415,6 +1415,18 @@ HTML_TEMPLATE = r'''
             padding: 12px;
         }
 
+        .jenkins-build-item.failure {
+            background: rgba(239, 68, 68, 0.12);
+            border-color: rgba(239, 68, 68, 0.45);
+            box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.08);
+        }
+
+        .jenkins-build-item.unstable {
+            background: rgba(245, 158, 11, 0.14);
+            border-color: rgba(245, 158, 11, 0.45);
+            box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.08);
+        }
+
         .jenkins-build-head {
             display: flex;
             justify-content: space-between;
@@ -1456,6 +1468,29 @@ HTML_TEMPLATE = r'''
 
         .jenkins-build-link:hover {
             text-decoration: underline;
+        }
+
+        .jenkins-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .jenkins-filter-btn {
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 0.78rem;
+            cursor: pointer;
+        }
+
+        .jenkins-filter-btn.active {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.45);
+            color: #ef4444;
         }
 
         .jenkins-empty {
@@ -2003,6 +2038,8 @@ HTML_TEMPLATE = r'''
         let currentProject = null;
         let currentLogTarget = null;
         let currentFile = null;
+        let currentSystemData = null;
+        let jenkinsFailuresOnly = false;
         
         // 초기화
         document.addEventListener('DOMContentLoaded', () => {
@@ -2052,6 +2089,7 @@ HTML_TEMPLATE = r'''
                 const response = await fetch('/api/system');
                 const data = await response.json();
                 cacheTime = Date.now();
+                currentSystemData = data;
                 renderSystemStatus(data);
             } catch (error) {
                 document.getElementById('mainContent').innerHTML = `
@@ -2061,18 +2099,31 @@ HTML_TEMPLATE = r'''
                 `;
             }
         }
+
+        function toggleJenkinsFailuresOnly() {
+            jenkinsFailuresOnly = !jenkinsFailuresOnly;
+            if (currentSystemData) {
+                renderSystemStatus(currentSystemData);
+            }
+        }
         
         // 시스템 상태 렌더링
         function renderSystemStatus(data) {
             const progressClass = (percent) => percent >= 90 ? 'danger' : percent >= 70 ? 'warning' : '';
             const renderJenkinsStatus = () => {
                 const jenkins = data.jenkins || {};
-                const jobs = Array.isArray(jenkins.jobs) ? jenkins.jobs : [];
+                const allJobs = Array.isArray(jenkins.jobs) ? jenkins.jobs : [];
+                const jobs = jenkinsFailuresOnly
+                    ? allJobs.filter(item => !['SUCCESS', 'UNKNOWN'].includes(item.result || 'UNKNOWN'))
+                    : allJobs;
                 const branchLabel = (branch) => {
                     if (!branch) return '-';
                     return branch.replace(/\.qs[0-9a-z]+$/i, '');
                 };
                 if (!jobs.length) {
+                    if (jenkinsFailuresOnly && allJobs.length) {
+                        return '<div class="jenkins-empty">현재 표시할 실패 빌드가 없습니다.</div>';
+                    }
                     if (jenkins.error) {
                         return `<div class="jenkins-empty">Jenkins 상태를 읽지 못했습니다: ${jenkins.error}</div>`;
                     }
@@ -2083,8 +2134,9 @@ HTML_TEMPLATE = r'''
                         ${jobs.map(item => {
                             const result = item.result || 'UNKNOWN';
                             const badgeClass = result === 'SUCCESS' ? 'running' : result === 'FAILURE' ? 'unhealthy' : 'stopped';
+                            const severityClass = result === 'FAILURE' ? 'failure' : result === 'UNSTABLE' ? 'unstable' : '';
                             return `
-                                <div class="jenkins-build-item">
+                                <div class="jenkins-build-item ${severityClass}">
                                     <div class="jenkins-build-head">
                                         <div>
                                             <div class="jenkins-job-name">${item.job}</div>
@@ -2185,7 +2237,10 @@ HTML_TEMPLATE = r'''
                         <div class="system-card full-width">
                             <div class="card-header">
                                 <div class="card-title"><span class="icon">👷</span>Jenkins 최근 빌드</div>
-                                <div class="card-value ${(data.jenkins && data.jenkins.healthy) ? '' : 'warning'}">${(data.jenkins && data.jenkins.healthy) ? '정상' : '확인 필요'}</div>
+                                <div class="jenkins-toolbar">
+                                    <button class="jenkins-filter-btn ${jenkinsFailuresOnly ? 'active' : ''}" onclick="toggleJenkinsFailuresOnly()">${jenkinsFailuresOnly ? '전체 보기' : '실패만 보기'}</button>
+                                    <div class="card-value ${(data.jenkins && data.jenkins.healthy) ? '' : 'warning'}">${(data.jenkins && data.jenkins.healthy) ? '정상' : '확인 필요'}</div>
+                                </div>
                             </div>
                             ${renderJenkinsStatus()}
                         </div>

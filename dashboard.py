@@ -181,6 +181,7 @@ JENKINS_HOME = resolve_jenkins_home()
 JENKINS_JOBS_DIR = JENKINS_HOME / 'jobs'
 JENKINS_BASE_URL = os.environ.get('JENKINS_BASE_URL', 'http://suho0213.iptime.org:9090').rstrip('/')
 ANSI_ESCAPE_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+JENKINS_LOG_HIGHLIGHT_RE = re.compile(r'(error|exception|failed|failure|fatal|traceback)', re.IGNORECASE)
 
 IGNORE_PATTERNS = [
     'venv', 'node_modules', '.git', '__pycache__', '.next',
@@ -803,6 +804,20 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
     def build_dir_for(branch_dir: Path, build_name: str) -> Path:
         return branch_dir / 'builds' / build_name
 
+    def read_recent_history(branch_dir: Path) -> list[str]:
+        builds_dir = branch_dir / 'builds'
+        build_dirs = [p for p in builds_dir.iterdir() if p.is_dir() and p.name.isdigit()] if builds_dir.exists() else []
+        build_dirs.sort(key=lambda p: int(p.name), reverse=True)
+        results = []
+        for build_dir in build_dirs:
+            result = read_result(build_dir / 'build.xml')
+            if result == 'UNKNOWN':
+                continue
+            results.append(result)
+            if len(results) >= 5:
+                break
+        return list(reversed(results))
+
     jobs = []
     try:
         for job_name, preferred_branches in tracked_jobs:
@@ -850,6 +865,7 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
                     'build': latest.name,
                     'result': result,
                     'timestamp': read_timestamp(build_xml),
+                    'recent_results': read_recent_history(branch_dir),
                     'build_url': f'{JENKINS_BASE_URL}/job/{quote(job_name, safe="")}/job/{quote(branch_dir.name, safe="")}/{latest.name}/',
                     'console_url': f'{JENKINS_BASE_URL}/job/{quote(job_name, safe="")}/job/{quote(branch_dir.name, safe="")}/{latest.name}/console',
                 })
@@ -1492,6 +1508,75 @@ HTML_TEMPLATE = r'''
             align-items: center;
             font-size: 0.78rem;
             color: var(--text-secondary);
+        }
+
+        .jenkins-trend {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-top: 8px;
+            font-size: 0.76rem;
+            color: var(--text-secondary);
+        }
+
+        .jenkins-trend-badges {
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .jenkins-trend-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 22px;
+            height: 22px;
+            padding: 0 6px;
+            border-radius: 999px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+        }
+
+        .jenkins-trend-pill.success {
+            color: #22c55e;
+            border-color: rgba(34, 197, 94, 0.35);
+        }
+
+        .jenkins-trend-pill.failure {
+            color: #ef4444;
+            border-color: rgba(239, 68, 68, 0.35);
+        }
+
+        .jenkins-trend-pill.unstable {
+            color: #f59e0b;
+            border-color: rgba(245, 158, 11, 0.35);
+        }
+
+        .jenkins-trend-pill.other {
+            color: var(--text-secondary);
+        }
+
+        .log-highlight-summary {
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            border-radius: 8px;
+            color: #fecaca;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+        }
+
+        .log-line-highlight {
+            display: block;
+            color: #fecaca;
+            background: rgba(239, 68, 68, 0.14);
+            border-left: 3px solid #ef4444;
+            padding-left: 8px;
+            margin-left: -8px;
         }
 
         .jenkins-build-link {
@@ -2197,6 +2282,38 @@ HTML_TEMPLATE = r'''
             }
         }
 
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function resultTrendMeta(result) {
+            const upper = String(result || 'UNKNOWN').toUpperCase();
+            if (upper === 'SUCCESS') return { short: 'S', cls: 'success' };
+            if (upper === 'FAILURE') return { short: 'F', cls: 'failure' };
+            if (upper === 'UNSTABLE') return { short: 'U', cls: 'unstable' };
+            if (upper === 'ABORTED') return { short: 'A', cls: 'other' };
+            return { short: upper.charAt(0) || '?', cls: 'other' };
+        }
+
+        function renderJenkinsLogPreview(logText) {
+            const lines = String(logText || '').split('\n');
+            const pattern = /(error|exception|failed|failure|fatal|traceback)/i;
+            const highlights = lines.filter(line => pattern.test(line)).slice(-8);
+            const body = lines.map(line => {
+                const escaped = escapeHtml(line);
+                return pattern.test(line) ? `<span class="log-line-highlight">${escaped}</span>` : escaped;
+            }).join('\n');
+            const summary = highlights.length
+                ? `<div class="log-highlight-summary">${highlights.map(escapeHtml).join('\n')}</div>`
+                : '';
+            return `${summary}${body}`;
+        }
+
         async function openJenkinsLogModal(item) {
             if (!item || !item.job || !item.branch || !item.build) {
                 showToast('Jenkins 로그 대상을 확인할 수 없습니다.', 'error', 3000);
@@ -2272,6 +2389,15 @@ HTML_TEMPLATE = r'''
                             <div class="jenkins-build-meta">
                                 <span>빌드 시각</span>
                                 <strong>${item.timestamp || '-'}</strong>
+                            </div>
+                            <div class="jenkins-trend">
+                                <span>최근 추세</span>
+                                <span class="jenkins-trend-badges">
+                                    ${(Array.isArray(item.recent_results) ? item.recent_results : []).map(result => {
+                                        const meta = resultTrendMeta(result);
+                                        return `<span class="jenkins-trend-pill ${meta.cls}" title="${escapeHtml(result)}">${meta.short}</span>`;
+                                    }).join('')}
+                                </span>
                             </div>
                             <div class="jenkins-build-links">
                                 ${item.build_url ? `<a class="jenkins-build-link" href="${item.build_url}" target="_blank" rel="noopener noreferrer">🔗 Jenkins 빌드 상세</a>` : ''}
@@ -2757,7 +2883,7 @@ HTML_TEMPLATE = r'''
                         content.textContent = `오류: ${data.error || 'Jenkins 로그를 가져오지 못했습니다.'}`;
                         content.className = 'log-container error';
                     } else {
-                        content.textContent = data.logs || '(로그가 비어 있습니다)';
+                        content.innerHTML = renderJenkinsLogPreview(data.logs || '(로그가 비어 있습니다)');
                         content.className = 'log-container';
                         content.scrollTop = content.scrollHeight;
                     }

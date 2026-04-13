@@ -54,7 +54,8 @@
       {
         "name": "스택 · API",
         "port": 8081,
-        "target": "dd-way-backend"
+        "target": "dd-way-backend",
+        "path": "/api/health"
       }
     ],
     "type": "docker"
@@ -79,12 +80,14 @@
       {
         "name": "Prod",
         "port": 7030,
-        "target": "Nong-Project-prod"
+        "target": "Nong-Project-prod",
+        "path": "/api/health"
       },
       {
         "name": "Dev",
         "port": 7031,
-        "target": "Nong-Project-dev"
+        "target": "Nong-Project-dev",
+        "path": "/api/health"
       }
     ],
     "type": "docker"
@@ -94,12 +97,14 @@
       {
         "name": "Prod",
         "port": 7040,
-        "target": "album-color-recommender-prod"
+        "target": "album-color-recommender-prod",
+        "path": "/health"
       },
       {
         "name": "Dev",
         "port": 7041,
-        "target": "album-color-recommender-dev"
+        "target": "album-color-recommender-dev",
+        "path": "/health"
       }
     ],
     "type": "docker"
@@ -109,12 +114,14 @@
       {
         "name": "Prod",
         "port": 7050,
-        "target": "artist-curation-monitor-prod"
+        "target": "artist-curation-monitor-prod",
+        "path": "/health"
       },
       {
         "name": "Dev",
         "port": 7051,
-        "target": "artist-curation-monitor-dev"
+        "target": "artist-curation-monitor-dev",
+        "path": "/health"
       }
     ],
     "type": "docker"
@@ -254,7 +261,7 @@
     "environments": [
       {
         "name": "Nginx",
-        "port": 8001,
+        "port": 80,
         "target": "web-app"
       }
     ],

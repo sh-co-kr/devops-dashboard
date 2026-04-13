@@ -9,7 +9,7 @@ services:
       # 설정 파일을 볼륨으로 마운트하여 웹에서 수정한 내용이 유지되도록
       - ./dashboard_config.json:/app/dashboard_config.json
       # 프로젝트 스캔 경로 (상위 디렉토리)
-      - ../:/workspace:ro
+      - ../../:/workspace:ro
       # Docker 소켓 마운트 (컨테이너 상태 확인용)
       - /var/run/docker.sock:/var/run/docker.sock:ro
     extra_hosts:
@@ -17,6 +17,7 @@ services:
     environment:
       - PORT=7112
       - SCAN_PATH=/workspace
+      - JENKINS_HOME_PATH=/workspace/jenkins_server/jenkins_home
       - TZ=Asia/Seoul
       - SITE_BASE_URL=${SITE_BASE_URL:-}
       - DEFAULT_PUBLIC_SITE=${DEFAULT_PUBLIC_SITE:-}

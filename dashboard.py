@@ -153,6 +153,32 @@ BASE_DIR = Path(os.environ.get('SCAN_PATH', _default_scan)).resolve()
 CONFIG_FILE = Path(__file__).parent / "dashboard_config.json"
 CACHE_TTL = 10
 
+def resolve_jenkins_home() -> Path:
+    candidates = []
+    env_path = os.environ.get('JENKINS_HOME_PATH')
+    if env_path:
+        candidates.append(Path(env_path))
+
+    candidates.extend([
+        Path('/home/user/sh-co-kr/jenkins_server/jenkins_home'),
+        BASE_DIR / 'jenkins_server' / 'jenkins_home',
+        Path('/workspace/jenkins_server/jenkins_home'),
+    ])
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+            if (resolved / 'jobs').exists():
+                return resolved
+        except Exception:
+            continue
+
+    return candidates[0].resolve() if candidates else Path('/home/user/sh-co-kr/jenkins_server/jenkins_home').resolve()
+
+
+JENKINS_HOME = resolve_jenkins_home()
+JENKINS_JOBS_DIR = JENKINS_HOME / 'jobs'
+
 IGNORE_PATTERNS = [
     'venv', 'node_modules', '.git', '__pycache__', '.next',
     'dist', 'build', '.cache', 'jenkins_home', '.venv'
@@ -670,7 +696,8 @@ def get_system_stats(force_refresh: bool = False) -> dict:
         'cpu': {'percent': 0, 'cores': 0, 'cores_logical': 0},
         'memory': {'total_gb': 0, 'used_gb': 0, 'percent': 0, 'available_gb': 0},
         'disk': {'total_gb': 0, 'used_gb': 0, 'percent': 0, 'free_gb': 0},
-        'boot_time': 'N/A', 'uptime': 'N/A', 'error': None
+        'boot_time': 'N/A', 'uptime': 'N/A', 'error': None,
+        'jenkins': get_recent_jenkins_statuses(force_refresh=force_refresh),
     }
     
     if not PSUTIL_AVAILABLE:
@@ -704,6 +731,99 @@ def get_system_stats(force_refresh: bool = False) -> dict:
     except Exception as e:
         result['error'] = str(e)
     
+    cache.set(cache_key, result)
+    return result
+
+
+def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
+    cache_key = 'jenkins_recent_status'
+    if not force_refresh:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    default = {'jobs': [], 'error': None, 'healthy': True}
+    if not JENKINS_JOBS_DIR.exists():
+        default['error'] = f'Jenkins jobs 디렉터리를 찾을 수 없습니다: {JENKINS_JOBS_DIR}'
+        cache.set(cache_key, default)
+        return default
+
+    tracked_jobs = [
+        ('devops-dashboard', ['main', 'develop']),
+        ('barocut', ['main', 'develop']),
+        ('meeting-compass', ['develop']),
+        ('b-side', ['main', 'develop']),
+        ('Nong-Project', ['main', 'develop']),
+        ('DD-WAY', ['main', 'develop', 'feature']),
+    ]
+
+    def read_result(build_xml: Path) -> str:
+        try:
+            text = build_xml.read_text(encoding='utf-8', errors='ignore')
+            marker_open = '<result>'
+            marker_close = '</result>'
+            start = text.find(marker_open)
+            end = text.find(marker_close)
+            if start != -1 and end != -1 and end > start:
+                return text[start + len(marker_open):end].strip() or 'UNKNOWN'
+        except Exception:
+            pass
+        return 'UNKNOWN'
+
+    jobs = []
+    try:
+        for job_name, preferred_branches in tracked_jobs:
+            branches_dir = JENKINS_JOBS_DIR / job_name / 'branches'
+            if not branches_dir.exists():
+                jobs.append({'job': job_name, 'branch': '-', 'build': '-', 'result': 'MISSING'})
+                continue
+
+            branch_dirs = [p for p in branches_dir.iterdir() if p.is_dir()]
+            branch_dirs.sort(key=lambda p: p.name)
+            selected = []
+            for preferred in preferred_branches:
+                if preferred == 'feature':
+                    selected.extend([p for p in branch_dirs if p.name.startswith('feature')])
+                    continue
+                for p in branch_dirs:
+                    if p.name == preferred:
+                        selected.append(p)
+                        break
+            seen = set()
+            unique_selected = []
+            for branch_dir in selected:
+                if branch_dir.name in seen:
+                    continue
+                seen.add(branch_dir.name)
+                unique_selected.append(branch_dir)
+
+            if not unique_selected:
+                jobs.append({'job': job_name, 'branch': '-', 'build': '-', 'result': 'MISSING'})
+                continue
+
+            for branch_dir in unique_selected:
+                builds_dir = branch_dir / 'builds'
+                build_dirs = [p for p in builds_dir.iterdir() if p.is_dir() and p.name.isdigit()] if builds_dir.exists() else []
+                build_dirs.sort(key=lambda p: int(p.name))
+                if not build_dirs:
+                    jobs.append({'job': job_name, 'branch': branch_dir.name, 'build': '-', 'result': 'UNKNOWN'})
+                    continue
+                latest = build_dirs[-1]
+                result = read_result(latest / 'build.xml')
+                jobs.append({
+                    'job': job_name,
+                    'branch': branch_dir.name,
+                    'build': latest.name,
+                    'result': result,
+                })
+    except Exception as e:
+        default['error'] = str(e)
+        default['healthy'] = False
+        cache.set(cache_key, default)
+        return default
+
+    unhealthy = any(item['result'] not in ('SUCCESS', 'UNKNOWN') for item in jobs)
+    result = {'jobs': jobs, 'error': None, 'healthy': not unhealthy}
     cache.set(cache_key, result)
     return result
 
@@ -1261,6 +1381,54 @@ HTML_TEMPLATE = r'''
         
         .system-card:hover { transform: translateY(-2px); }
         .system-card.full-width { grid-column: span 2; }
+
+        .jenkins-build-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .jenkins-build-item {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+        }
+
+        .jenkins-build-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .jenkins-job-name {
+            font-size: 0.92rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .jenkins-branch-name {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+
+        .jenkins-build-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+        }
+
+        .jenkins-empty {
+            margin-top: 12px;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
         
         .card-header {
             display: flex;
@@ -1863,6 +2031,39 @@ HTML_TEMPLATE = r'''
         // 시스템 상태 렌더링
         function renderSystemStatus(data) {
             const progressClass = (percent) => percent >= 90 ? 'danger' : percent >= 70 ? 'warning' : '';
+            const renderJenkinsStatus = () => {
+                const jenkins = data.jenkins || {};
+                const jobs = Array.isArray(jenkins.jobs) ? jenkins.jobs : [];
+                if (!jobs.length) {
+                    if (jenkins.error) {
+                        return `<div class="jenkins-empty">Jenkins 상태를 읽지 못했습니다: ${jenkins.error}</div>`;
+                    }
+                    return '<div class="jenkins-empty">표시할 Jenkins 빌드 정보가 없습니다.</div>';
+                }
+                return `
+                    <div class="jenkins-build-grid">
+                        ${jobs.map(item => {
+                            const result = item.result || 'UNKNOWN';
+                            const badgeClass = result === 'SUCCESS' ? 'running' : result === 'FAILURE' ? 'unhealthy' : 'stopped';
+                            return `
+                                <div class="jenkins-build-item">
+                                    <div class="jenkins-build-head">
+                                        <div>
+                                            <div class="jenkins-job-name">${item.job}</div>
+                                            <div class="jenkins-branch-name">${item.branch}</div>
+                                        </div>
+                                        <span class="status-badge ${badgeClass}">${result}</span>
+                                    </div>
+                                    <div class="jenkins-build-meta">
+                                        <span>최근 빌드</span>
+                                        <strong>#${item.build}</strong>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+            };
             
             document.getElementById('mainContent').innerHTML = `
                 <div class="system-dashboard">
@@ -1940,6 +2141,14 @@ HTML_TEMPLATE = r'''
                                 <div class="info-item"><div class="icon">📁</div><div class="label">Projects</div><div class="value">${document.querySelectorAll('.project-item').length}</div></div>
                                 <div class="info-item"><div class="icon">🌐</div><div class="label">Dashboard</div><div class="value">${getDashboardLabel()}</div></div>
                             </div>
+                        </div>
+
+                        <div class="system-card full-width">
+                            <div class="card-header">
+                                <div class="card-title"><span class="icon">👷</span>Jenkins 최근 빌드</div>
+                                <div class="card-value ${(data.jenkins && data.jenkins.healthy) ? '' : 'warning'}">${(data.jenkins && data.jenkins.healthy) ? '정상' : '확인 필요'}</div>
+                            </div>
+                            ${renderJenkinsStatus()}
                         </div>
                     </div>
                     

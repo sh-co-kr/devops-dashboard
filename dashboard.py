@@ -53,6 +53,7 @@ DEFAULT_DASHBOARD_SETTINGS = {
     'site_base_url': ENV_DEFAULT_PUBLIC_SITE,
     'site_host_label': '',
     'jenkins_webhook_url': '',
+    'jenkins_webhook_type': 'auto',
     'quick_links': [
         {'title': '공유기 관리자', 'icon': '📡', 'port': 9080},
         {'title': 'Jenkins 서버', 'icon': '👷', 'port': 9090},
@@ -124,7 +125,7 @@ def get_dashboard_settings(config: dict | None = None) -> dict:
     settings = dict(DEFAULT_DASHBOARD_SETTINGS)
     raw_settings = config.get('dashboard_settings', {})
     if isinstance(raw_settings, dict):
-        for key in ('site_base_url', 'site_host_label', 'jenkins_webhook_url'):
+        for key in ('site_base_url', 'site_host_label', 'jenkins_webhook_url', 'jenkins_webhook_type'):
             value = raw_settings.get(key)
             if isinstance(value, str):
                 settings[key] = value.strip()
@@ -901,6 +902,7 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
     try:
         dashboard_settings = get_dashboard_settings(load_config())
         webhook_url = (dashboard_settings.get('jenkins_webhook_url') or '').strip()
+        webhook_type = (dashboard_settings.get('jenkins_webhook_type') or 'auto').strip().lower()
         if webhook_url:
             previous_state = {}
             if JENKINS_ALERT_STATE_FILE.exists():
@@ -923,30 +925,7 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
                     event = 'jenkins_recovery'
                 if not event:
                     continue
-
-                payload = {
-                    'event': event,
-                    'job': item.get('job'),
-                    'branch': item.get('branch'),
-                    'build': item.get('build'),
-                    'result': current_result,
-                    'timestamp': item.get('timestamp'),
-                    'trend_warning': bool(item.get('trend_warning')),
-                    'build_url': item.get('build_url'),
-                    'console_url': item.get('console_url'),
-                    'message': (
-                        f"[{event}] {item.get('job')} {item.get('branch')} #{item.get('build')} "
-                        f"{current_result} ({item.get('timestamp') or '시간 미상'})"
-                    ),
-                }
-                req = urllib.request.Request(
-                    webhook_url,
-                    data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
-                    headers={'Content-Type': 'application/json'},
-                    method='POST',
-                )
-                with urllib.request.urlopen(req, timeout=10) as _:
-                    pass
+                send_jenkins_webhook_event(webhook_url, webhook_type, event, item, current_result)
 
             JENKINS_ALERT_STATE_FILE.write_text(json.dumps(updates, ensure_ascii=False, indent=2), encoding='utf-8')
     except Exception:
@@ -954,6 +933,110 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
 
     cache.set(cache_key, result)
     return result
+
+
+def detect_jenkins_webhook_type(webhook_url: str, configured_type: str) -> str:
+    normalized = (configured_type or 'auto').strip().lower()
+    if normalized and normalized != 'auto':
+        return normalized
+    url = (webhook_url or '').lower()
+    if 'discord.com/api/webhooks/' in url or 'discordapp.com/api/webhooks/' in url:
+        return 'discord'
+    if 'outlook.office.com/webhook/' in url or 'office.com/webhook/' in url or 'logic.azure.com/' in url:
+        return 'teams'
+    return 'generic'
+
+
+def build_jenkins_webhook_payload(provider: str, event: str, item: dict, result: str) -> tuple[dict, dict]:
+    job = item.get('job')
+    branch = item.get('branch')
+    build = item.get('build')
+    timestamp = item.get('timestamp') or '시간 미상'
+    trend_warning = bool(item.get('trend_warning'))
+    build_url = item.get('build_url')
+    console_url = item.get('console_url')
+    message = f"[{event}] {job} {branch} #{build} {result} ({timestamp})"
+
+    generic_payload = {
+        'event': event,
+        'job': job,
+        'branch': branch,
+        'build': build,
+        'result': result,
+        'timestamp': timestamp,
+        'trend_warning': trend_warning,
+        'build_url': build_url,
+        'console_url': console_url,
+        'message': message,
+    }
+
+    if provider == 'discord':
+        color = 0x22C55E if result == 'SUCCESS' else 0xEF4444 if result == 'FAILURE' else 0xF59E0B
+        payload = {
+            'content': message,
+            'embeds': [{
+                'title': f'Jenkins 알림: {job}',
+                'description': f'브랜치 `{branch}` / 빌드 `#{build}` / 결과 `{result}`',
+                'color': color,
+                'fields': [
+                    {'name': '이벤트', 'value': event, 'inline': True},
+                    {'name': '시각', 'value': timestamp, 'inline': True},
+                    {'name': '하락 추세', 'value': '예' if trend_warning else '아니오', 'inline': True},
+                    {'name': '빌드 상세', 'value': build_url or '-', 'inline': False},
+                    {'name': '콘솔', 'value': console_url or '-', 'inline': False},
+                ],
+            }],
+        }
+        return payload, {'Content-Type': 'application/json'}
+
+    if provider == 'teams':
+        theme_color = '22C55E' if result == 'SUCCESS' else 'EF4444' if result == 'FAILURE' else 'F59E0B'
+        payload = {
+            '@type': 'MessageCard',
+            '@context': 'https://schema.org/extensions',
+            'themeColor': theme_color,
+            'summary': message,
+            'title': f'Jenkins 알림: {job}',
+            'text': message,
+            'sections': [{
+                'facts': [
+                    {'name': '브랜치', 'value': str(branch)},
+                    {'name': '빌드', 'value': f'#{build}'},
+                    {'name': '결과', 'value': str(result)},
+                    {'name': '시각', 'value': str(timestamp)},
+                    {'name': '하락 추세', 'value': '예' if trend_warning else '아니오'},
+                ],
+                'markdown': True,
+            }],
+            'potentialAction': [
+                {
+                    '@type': 'OpenUri',
+                    'name': '빌드 상세 열기',
+                    'targets': [{'os': 'default', 'uri': build_url or JENKINS_BASE_URL}],
+                },
+                {
+                    '@type': 'OpenUri',
+                    'name': '콘솔 열기',
+                    'targets': [{'os': 'default', 'uri': console_url or JENKINS_BASE_URL}],
+                },
+            ],
+        }
+        return payload, {'Content-Type': 'application/json'}
+
+    return generic_payload, {'Content-Type': 'application/json'}
+
+
+def send_jenkins_webhook_event(webhook_url: str, configured_type: str, event: str, item: dict, result: str) -> None:
+    provider = detect_jenkins_webhook_type(webhook_url, configured_type)
+    payload, headers = build_jenkins_webhook_payload(provider, event, item, result)
+    req = urllib.request.Request(
+        webhook_url,
+        data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+        headers=headers,
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=10) as _:
+        pass
 
 
 def render_markdown_content(content: str) -> str:
@@ -2131,6 +2214,15 @@ HTML_TEMPLATE = r'''
                                 <span style="font-size: 0.85rem; color: var(--text-secondary);">JENKINS_WEBHOOK_URL</span>
                                 <input id="dashboardJenkinsWebhookUrl" type="text" placeholder="예: https://example.com/webhook" style="width: 100%; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateDashboardSetting('jenkins_webhook_url', this.value)">
                             </label>
+                            <label style="display: grid; gap: 6px;">
+                                <span style="font-size: 0.85rem; color: var(--text-secondary);">JENKINS_WEBHOOK_TYPE</span>
+                                <select id="dashboardJenkinsWebhookType" style="width: 100%; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateDashboardSetting('jenkins_webhook_type', this.value)">
+                                    <option value="auto">auto</option>
+                                    <option value="generic">generic</option>
+                                    <option value="discord">discord</option>
+                                    <option value="teams">teams</option>
+                                </select>
+                            </label>
                         </div>
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                             <h4 style="font-size: 0.95rem; margin: 0; color: var(--text-primary);">🔗 Quick Links</h4>
@@ -3076,6 +3168,7 @@ HTML_TEMPLATE = r'''
             document.getElementById('dashboardSiteBaseUrl').value = settings.site_base_url || '';
             document.getElementById('dashboardSiteHostLabel').value = settings.site_host_label || '';
             document.getElementById('dashboardJenkinsWebhookUrl').value = settings.jenkins_webhook_url || '';
+            document.getElementById('dashboardJenkinsWebhookType').value = settings.jenkins_webhook_type || 'auto';
 
             const container = document.getElementById('dashboardQuickLinksList');
             container.innerHTML = '';

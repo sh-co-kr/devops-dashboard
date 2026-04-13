@@ -170,6 +170,7 @@
   },
   "dashboard_settings": {
     "jenkins_webhook_url": "",
+    "jenkins_webhook_type": "auto",
     "quick_links": [
       {
         "icon": "📡",

@@ -99,6 +99,7 @@
   "site_base_url": "http://suho0213.iptime.org",
   "site_host_label": "suho0213.iptime.org",
   "jenkins_webhook_url": "",
+  "jenkins_webhook_type": "auto",
   "quick_links": [
     { "title": "공유기 관리자", "icon": "📡", "port": 9080 }
   ]
@@ -110,6 +111,7 @@
 - `site_base_url`: 서비스 링크 생성 시 기준이 되는 공개 주소
 - `site_host_label`: 화면에 표시할 호스트 라벨
 - `jenkins_webhook_url`: Jenkins 실패/복구 상태 변경 시 JSON payload를 보낼 웹훅 URL. 비워두면 알림 비활성
+- `jenkins_webhook_type`: `auto`, `generic`, `discord`, `teams` 중 선택. `auto`면 URL 패턴으로 자동 감지
 - `quick_links`: 상단 Quick Links 목록
 
 Quick Link 항목은 아래 형식을 사용합니다.

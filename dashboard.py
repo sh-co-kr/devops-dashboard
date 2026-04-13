@@ -52,6 +52,7 @@ ENV_DEFAULT_PUBLIC_SITE = (os.environ.get("DEFAULT_PUBLIC_SITE") or "").strip()
 DEFAULT_DASHBOARD_SETTINGS = {
     'site_base_url': ENV_DEFAULT_PUBLIC_SITE,
     'site_host_label': '',
+    'jenkins_webhook_url': '',
     'quick_links': [
         {'title': '공유기 관리자', 'icon': '📡', 'port': 9080},
         {'title': 'Jenkins 서버', 'icon': '👷', 'port': 9090},
@@ -123,7 +124,7 @@ def get_dashboard_settings(config: dict | None = None) -> dict:
     settings = dict(DEFAULT_DASHBOARD_SETTINGS)
     raw_settings = config.get('dashboard_settings', {})
     if isinstance(raw_settings, dict):
-        for key in ('site_base_url', 'site_host_label'):
+        for key in ('site_base_url', 'site_host_label', 'jenkins_webhook_url'):
             value = raw_settings.get(key)
             if isinstance(value, str):
                 settings[key] = value.strip()
@@ -180,6 +181,7 @@ def resolve_jenkins_home() -> Path:
 JENKINS_HOME = resolve_jenkins_home()
 JENKINS_JOBS_DIR = JENKINS_HOME / 'jobs'
 JENKINS_BASE_URL = os.environ.get('JENKINS_BASE_URL', 'http://suho0213.iptime.org:9090').rstrip('/')
+JENKINS_ALERT_STATE_FILE = Path(os.environ.get('JENKINS_ALERT_STATE_FILE', '/tmp/devops-dashboard-jenkins-alert-state.json'))
 ANSI_ESCAPE_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 JENKINS_LOG_HIGHLIGHT_RE = re.compile(r'(error|exception|failed|failure|fatal|traceback)', re.IGNORECASE)
 
@@ -818,6 +820,16 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
                 break
         return list(reversed(results))
 
+    def is_failure_like(result: str) -> bool:
+        return str(result or 'UNKNOWN').upper() in ('FAILURE', 'UNSTABLE', 'ABORTED')
+
+    def is_worsening_trend(history: list[str]) -> bool:
+        normalized = [str(item or 'UNKNOWN').upper() for item in history if item]
+        if len(normalized) >= 2 and normalized[-1] in ('FAILURE', 'UNSTABLE', 'ABORTED') and normalized[-2] == 'SUCCESS':
+            return True
+        recent = normalized[-3:]
+        return len(recent) >= 2 and sum(1 for item in recent if item in ('FAILURE', 'UNSTABLE', 'ABORTED')) >= 2
+
     jobs = []
     try:
         for job_name, preferred_branches in tracked_jobs:
@@ -859,13 +871,15 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
                 latest = build_dirs[-1]
                 build_xml = latest / 'build.xml'
                 result = read_result(build_xml)
+                recent_results = read_recent_history(branch_dir)
                 jobs.append({
                     'job': job_name,
                     'branch': branch_dir.name,
                     'build': latest.name,
                     'result': result,
                     'timestamp': read_timestamp(build_xml),
-                    'recent_results': read_recent_history(branch_dir),
+                    'recent_results': recent_results,
+                    'trend_warning': is_worsening_trend(recent_results),
                     'build_url': f'{JENKINS_BASE_URL}/job/{quote(job_name, safe="")}/job/{quote(branch_dir.name, safe="")}/{latest.name}/',
                     'console_url': f'{JENKINS_BASE_URL}/job/{quote(job_name, safe="")}/job/{quote(branch_dir.name, safe="")}/{latest.name}/console',
                 })
@@ -883,6 +897,61 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
 
     unhealthy = any(item['result'] not in ('SUCCESS', 'UNKNOWN') for item in jobs)
     result = {'jobs': jobs, 'error': None, 'healthy': not unhealthy}
+
+    try:
+        dashboard_settings = get_dashboard_settings(load_config())
+        webhook_url = (dashboard_settings.get('jenkins_webhook_url') or '').strip()
+        if webhook_url:
+            previous_state = {}
+            if JENKINS_ALERT_STATE_FILE.exists():
+                previous_state = json.loads(JENKINS_ALERT_STATE_FILE.read_text(encoding='utf-8'))
+
+            updates = {}
+            for item in jobs:
+                key = f"{item.get('job')}::{item.get('branch')}"
+                current_result = str(item.get('result') or 'UNKNOWN').upper()
+                previous_result = str(previous_state.get(key, {}).get('result') or 'UNKNOWN').upper()
+                updates[key] = {
+                    'result': current_result,
+                    'build': item.get('build'),
+                    'timestamp': item.get('timestamp'),
+                }
+                event = None
+                if is_failure_like(current_result) and current_result != previous_result:
+                    event = 'jenkins_failure'
+                elif previous_result in ('FAILURE', 'UNSTABLE', 'ABORTED') and current_result == 'SUCCESS':
+                    event = 'jenkins_recovery'
+                if not event:
+                    continue
+
+                payload = {
+                    'event': event,
+                    'job': item.get('job'),
+                    'branch': item.get('branch'),
+                    'build': item.get('build'),
+                    'result': current_result,
+                    'timestamp': item.get('timestamp'),
+                    'trend_warning': bool(item.get('trend_warning')),
+                    'build_url': item.get('build_url'),
+                    'console_url': item.get('console_url'),
+                    'message': (
+                        f"[{event}] {item.get('job')} {item.get('branch')} #{item.get('build')} "
+                        f"{current_result} ({item.get('timestamp') or '시간 미상'})"
+                    ),
+                }
+                req = urllib.request.Request(
+                    webhook_url,
+                    data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+                    headers={'Content-Type': 'application/json'},
+                    method='POST',
+                )
+                with urllib.request.urlopen(req, timeout=10) as _:
+                    pass
+
+            JENKINS_ALERT_STATE_FILE.write_text(json.dumps(updates, ensure_ascii=False, indent=2), encoding='utf-8')
+    except Exception:
+        pass
+
     cache.set(cache_key, result)
     return result
 
@@ -1559,6 +1628,20 @@ HTML_TEMPLATE = r'''
             color: var(--text-secondary);
         }
 
+        .jenkins-warning-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 8px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(245, 158, 11, 0.14);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            color: #f59e0b;
+            font-size: 0.74rem;
+            font-weight: 700;
+        }
+
         .log-highlight-summary {
             margin-bottom: 12px;
             padding: 10px 12px;
@@ -2044,6 +2127,10 @@ HTML_TEMPLATE = r'''
                                 <span style="font-size: 0.85rem; color: var(--text-secondary);">SITE_HOST_LABEL</span>
                                 <input id="dashboardSiteHostLabel" type="text" placeholder="예: ops.example.com" style="width: 100%; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateDashboardSetting('site_host_label', this.value)">
                             </label>
+                            <label style="display: grid; gap: 6px;">
+                                <span style="font-size: 0.85rem; color: var(--text-secondary);">JENKINS_WEBHOOK_URL</span>
+                                <input id="dashboardJenkinsWebhookUrl" type="text" placeholder="예: https://example.com/webhook" style="width: 100%; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" onchange="updateDashboardSetting('jenkins_webhook_url', this.value)">
+                            </label>
                         </div>
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                             <h4 style="font-size: 0.95rem; margin: 0; color: var(--text-primary);">🔗 Quick Links</h4>
@@ -2399,6 +2486,7 @@ HTML_TEMPLATE = r'''
                                     }).join('')}
                                 </span>
                             </div>
+                            ${item.trend_warning ? `<div class="jenkins-warning-badge">⚠️ 하락 추세 감지</div>` : ''}
                             <div class="jenkins-build-links">
                                 ${item.build_url ? `<a class="jenkins-build-link" href="${item.build_url}" target="_blank" rel="noopener noreferrer">🔗 Jenkins 빌드 상세</a>` : ''}
                                 ${['FAILURE', 'UNSTABLE', 'ABORTED'].includes(result) && item.console_url ? `<a class="jenkins-build-link" href="${item.console_url}" target="_blank" rel="noopener noreferrer">📜 실패 콘솔</a>` : ''}
@@ -2987,6 +3075,7 @@ HTML_TEMPLATE = r'''
             const settings = ensureDashboardSettings();
             document.getElementById('dashboardSiteBaseUrl').value = settings.site_base_url || '';
             document.getElementById('dashboardSiteHostLabel').value = settings.site_host_label || '';
+            document.getElementById('dashboardJenkinsWebhookUrl').value = settings.jenkins_webhook_url || '';
 
             const container = document.getElementById('dashboardQuickLinksList');
             container.innerHTML = '';

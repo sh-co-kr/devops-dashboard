@@ -169,6 +169,7 @@
     "type": "docker"
   },
   "dashboard_settings": {
+    "jenkins_webhook_url": "",
     "quick_links": [
       {
         "icon": "📡",

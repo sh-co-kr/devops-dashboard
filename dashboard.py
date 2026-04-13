@@ -15,6 +15,7 @@ v3.0 업데이트:
 import os
 import json
 import time
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -179,6 +180,7 @@ def resolve_jenkins_home() -> Path:
 JENKINS_HOME = resolve_jenkins_home()
 JENKINS_JOBS_DIR = JENKINS_HOME / 'jobs'
 JENKINS_BASE_URL = os.environ.get('JENKINS_BASE_URL', 'http://suho0213.iptime.org:9090').rstrip('/')
+ANSI_ESCAPE_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 IGNORE_PATTERNS = [
     'venv', 'node_modules', '.git', '__pycache__', '.next',
@@ -797,6 +799,9 @@ def get_recent_jenkins_statuses(force_refresh: bool = False) -> dict:
         except Exception:
             pass
         return None
+
+    def build_dir_for(branch_dir: Path, build_name: str) -> Path:
+        return branch_dir / 'builds' / build_name
 
     jobs = []
     try:
@@ -1425,6 +1430,21 @@ HTML_TEMPLATE = r'''
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 10px;
             margin-top: 12px;
+        }
+
+        .jenkins-failure-section {
+            margin-top: 14px;
+            padding: 14px;
+            border-radius: 10px;
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            background: rgba(239, 68, 68, 0.08);
+        }
+
+        .jenkins-failure-title {
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: #ef4444;
+            margin-bottom: 10px;
         }
 
         .jenkins-build-item {
@@ -2177,6 +2197,25 @@ HTML_TEMPLATE = r'''
             }
         }
 
+        async function openJenkinsLogModal(item) {
+            if (!item || !item.job || !item.branch || !item.build) {
+                showToast('Jenkins 로그 대상을 확인할 수 없습니다.', 'error', 3000);
+                return;
+            }
+            currentLogTarget = {
+                mode: 'jenkins',
+                job: item.job,
+                branch: item.branch,
+                build: item.build,
+                title: `${item.job} / ${item.branch} #${item.build}`,
+            };
+            document.getElementById('modalTitle').textContent = `${item.job} / ${item.branch} #${item.build} Jenkins 로그`;
+            document.getElementById('logContent').textContent = 'Jenkins 로그를 불러오는 중...';
+            document.getElementById('logContent').className = 'log-container loading';
+            document.getElementById('logModal').classList.add('show');
+            await fetchLogs(currentLogTarget);
+        }
+
         function syncSystemSummary(failureCount) {
             const runningEl = document.getElementById('runningCount');
             const issueEl = document.getElementById('issueCount');
@@ -2208,9 +2247,39 @@ HTML_TEMPLATE = r'''
                         .filter(Boolean)
                         .some(value => String(value).toLowerCase().includes(jenkinsSearchTerm));
                 });
+                const failureJobs = allJobs.filter(item => ['FAILURE', 'UNSTABLE', 'ABORTED'].includes(item.result || 'UNKNOWN'));
                 const branchLabel = (branch) => {
                     if (!branch) return '-';
                     return branch.replace(/\.qs[0-9a-z]+$/i, '');
+                };
+                const renderJobCard = (item) => {
+                    const result = item.result || 'UNKNOWN';
+                    const badgeClass = result === 'SUCCESS' ? 'running' : result === 'FAILURE' ? 'unhealthy' : 'stopped';
+                    const severityClass = result === 'FAILURE' ? 'failure' : result === 'UNSTABLE' ? 'unstable' : '';
+                    return `
+                        <div class="jenkins-build-item ${severityClass}">
+                            <div class="jenkins-build-head">
+                                <div>
+                                    <div class="jenkins-job-name">${item.job}</div>
+                                    <div class="jenkins-branch-name">${branchLabel(item.branch)}</div>
+                                </div>
+                                <span class="status-badge ${badgeClass}">${result}</span>
+                            </div>
+                            <div class="jenkins-build-meta">
+                                <span>최근 빌드</span>
+                                <strong>#${item.build}</strong>
+                            </div>
+                            <div class="jenkins-build-meta">
+                                <span>빌드 시각</span>
+                                <strong>${item.timestamp || '-'}</strong>
+                            </div>
+                            <div class="jenkins-build-links">
+                                ${item.build_url ? `<a class="jenkins-build-link" href="${item.build_url}" target="_blank" rel="noopener noreferrer">🔗 Jenkins 빌드 상세</a>` : ''}
+                                ${['FAILURE', 'UNSTABLE', 'ABORTED'].includes(result) && item.console_url ? `<a class="jenkins-build-link" href="${item.console_url}" target="_blank" rel="noopener noreferrer">📜 실패 콘솔</a>` : ''}
+                                ${['FAILURE', 'UNSTABLE', 'ABORTED'].includes(result) ? `<button type="button" class="btn btn-sm" onclick='openJenkinsLogModal(${JSON.stringify(item)})'>👀 로그 미리보기</button>` : ''}
+                            </div>
+                        </div>
+                    `;
                 };
                 if (!jobs.length) {
                     if (jenkinsSearchTerm && filteredByStatus.length) {
@@ -2225,35 +2294,16 @@ HTML_TEMPLATE = r'''
                     return '<div class="jenkins-empty">표시할 Jenkins 빌드 정보가 없습니다.</div>';
                 }
                 return `
+                    ${!jenkinsFailuresOnly && !jenkinsSearchTerm && failureJobs.length ? `
+                        <div class="jenkins-failure-section">
+                            <div class="jenkins-failure-title">🚨 최근 실패/불안정 빌드</div>
+                            <div class="jenkins-build-grid">
+                                ${failureJobs.map(renderJobCard).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
                     <div class="jenkins-build-grid">
-                        ${jobs.map(item => {
-                            const result = item.result || 'UNKNOWN';
-                            const badgeClass = result === 'SUCCESS' ? 'running' : result === 'FAILURE' ? 'unhealthy' : 'stopped';
-                            const severityClass = result === 'FAILURE' ? 'failure' : result === 'UNSTABLE' ? 'unstable' : '';
-                            return `
-                                <div class="jenkins-build-item ${severityClass}">
-                                    <div class="jenkins-build-head">
-                                        <div>
-                                            <div class="jenkins-job-name">${item.job}</div>
-                                            <div class="jenkins-branch-name">${branchLabel(item.branch)}</div>
-                                        </div>
-                                        <span class="status-badge ${badgeClass}">${result}</span>
-                                    </div>
-                                    <div class="jenkins-build-meta">
-                                        <span>최근 빌드</span>
-                                        <strong>#${item.build}</strong>
-                                    </div>
-                                    <div class="jenkins-build-meta">
-                                        <span>빌드 시각</span>
-                                        <strong>${item.timestamp || '-'}</strong>
-                                    </div>
-                                    <div class="jenkins-build-links">
-                                        ${item.build_url ? `<a class="jenkins-build-link" href="${item.build_url}" target="_blank" rel="noopener noreferrer">🔗 Jenkins 빌드 상세</a>` : ''}
-                                        ${['FAILURE', 'UNSTABLE', 'ABORTED'].includes(result) && item.console_url ? `<a class="jenkins-build-link" href="${item.console_url}" target="_blank" rel="noopener noreferrer">📜 실패 콘솔</a>` : ''}
-                                    </div>
-                                </div>
-                            `;
-                        }).join('')}
+                        ${jobs.map(renderJobCard).join('')}
                     </div>
                 `;
             };
@@ -2689,11 +2739,29 @@ HTML_TEMPLATE = r'''
             const content = document.getElementById('logContent');
             try {
                 if (!logRequest || !Array.isArray(logRequest.targets) || !logRequest.targets.length) {
-                    content.textContent = '로그 대상이 없습니다.';
-                    content.className = 'log-container error';
-                    return;
+                    if (logRequest.mode !== 'jenkins') {
+                        content.textContent = '로그 대상이 없습니다.';
+                        content.className = 'log-container error';
+                        return;
+                    }
                 }
-                if (logRequest.mode === 'multi' && logRequest.targets.length > 1) {
+                if (logRequest.mode === 'jenkins') {
+                    const params = new URLSearchParams({
+                        job: logRequest.job,
+                        branch: logRequest.branch,
+                        build: logRequest.build,
+                    });
+                    const response = await fetch(`/api/jenkins/logs?${params.toString()}`);
+                    const data = await response.json();
+                    if (!response.ok || data.error) {
+                        content.textContent = `오류: ${data.error || 'Jenkins 로그를 가져오지 못했습니다.'}`;
+                        content.className = 'log-container error';
+                    } else {
+                        content.textContent = data.logs || '(로그가 비어 있습니다)';
+                        content.className = 'log-container';
+                        content.scrollTop = content.scrollHeight;
+                    }
+                } else if (logRequest.mode === 'multi' && logRequest.targets.length > 1) {
                     const sections = await Promise.all(logRequest.targets.map(async (target) => {
                         const response = await fetch(`/api/logs/${target}`);
                         const data = await response.json();
@@ -3340,6 +3408,36 @@ def api_logs(target):
         return jsonify({'status': 'ok', 'container': target, 'logs': logs.decode('utf-8', errors='replace')})
     except docker.errors.NotFound:
         return jsonify({'error': f'컨테이너 "{target}"을(를) 찾을 수 없습니다.'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/jenkins/logs')
+def api_jenkins_logs():
+    job = (request.args.get('job') or '').strip()
+    branch = (request.args.get('branch') or '').strip()
+    build = (request.args.get('build') or '').strip()
+    if not job or not branch or not build:
+        return jsonify({'error': 'job, branch, build 파라미터가 필요합니다.'}), 400
+
+    build_dir = JENKINS_JOBS_DIR / job / 'branches' / branch / 'builds' / build
+    log_file = build_dir / 'log'
+    if not log_file.exists():
+        return jsonify({'error': f'Jenkins 로그를 찾을 수 없습니다: {job}/{branch}/#{build}'}), 404
+
+    try:
+        raw = log_file.read_text(encoding='utf-8', errors='replace')
+        cleaned = ANSI_ESCAPE_RE.sub('', raw)
+        lines = cleaned.splitlines()
+        tail_lines = lines[-160:] if len(lines) > 160 else lines
+        return jsonify({
+            'status': 'ok',
+            'job': job,
+            'branch': branch,
+            'build': build,
+            'logs': '\n'.join(tail_lines),
+            'line_count': len(lines),
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
